@@ -2,24 +2,14 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   root: '.',
+  // GitHub Pages 部署路径
+  base: '/3DProcedural_Ecosystem/',
   server: {
     port: 3000,
     open: true
   },
   build: {
-    lib: {
-      entry: 'src/index.js',
-      name: 'ProceduralEcosystem',
-      formats: ['es', 'umd'],
-      fileName: (format) => `procedural-ecosystem.${format}.js`
-    },
-    rollupOptions: {
-      external: ['three'],
-      output: {
-        globals: {
-          three: 'THREE'
-        }
-      }
-    }
+    outDir: 'dist',
+    assetsDir: 'assets',
   }
 });
