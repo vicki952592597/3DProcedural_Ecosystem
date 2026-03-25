@@ -1,0 +1,1585 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>🌸 Flower – TroisJS Replica</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { background: #fff; overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+    canvas { display: block; }
+
+    /* ========== 右侧工具栏 ========== */
+    #toolbar {
+      position: fixed; right: 14px; top: 50%; transform: translateY(-50%);
+      display: flex; flex-direction: row-reverse; align-items: flex-end; gap: 10px;
+      z-index: 100; user-select: none; font-size: 12px; color: #ccc;
+    }
+    #btnBar {
+      display: flex; flex-direction: column; gap: 6px;
+    }
+    .tbtn {
+      width: 42px; height: 42px; border-radius: 50%;
+      border: 2px solid rgba(255,255,255,0.08);
+      background: rgba(25,25,38,0.88); font-size: 18px; line-height: 38px;
+      text-align: center; cursor: pointer; backdrop-filter: blur(12px);
+      transition: all 0.25s; position: relative;
+    }
+    .tbtn:hover { border-color: rgba(255,255,255,0.25); transform: translateX(-2px); }
+    .tbtn.active {
+      border-color: rgba(255,160,200,0.5); background: rgba(50,30,50,0.95);
+      box-shadow: 0 0 16px rgba(255,100,150,0.2); transform: translateX(-3px);
+    }
+    .tbtn-label {
+      position: absolute; right: 50px; top: 50%; transform: translateY(-50%);
+      font-size: 9px; color: rgba(255,255,255,0.3); white-space: nowrap;
+      pointer-events: none; opacity: 0; transition: opacity 0.2s;
+    }
+    .tbtn:hover .tbtn-label, .tbtn.active .tbtn-label { opacity: 1; color: rgba(255,255,255,0.6); }
+
+    /* 弹出面板 — 紧贴按钮栏左侧 */
+    #flyout {
+      background: rgba(22,22,34,0.95); border-radius: 14px;
+      padding: 14px 18px; width: 300px; max-height: 70vh; overflow-y: auto;
+      backdrop-filter: blur(16px); border: 1px solid rgba(255,255,255,0.06);
+      display: none; box-shadow: -8px 0 40px rgba(0,0,0,0.35);
+      scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.1) transparent;
+    }
+    #flyout.open { display: block; animation: flyLeft 0.22s ease-out; }
+    @keyframes flyLeft {
+      from { opacity: 0; transform: translateX(12px); }
+      to { opacity: 1; transform: translateX(0); }
+    }
+    #flyout .fp-title {
+      font-size: 13px; font-weight: 600; color: #eee; margin-bottom: 10px;
+      padding-bottom: 6px; border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .tool-section { display: none; }
+    .tool-section.active { display: block; }
+
+    /* 控件行 */
+    .ctrl {
+      display: flex; align-items: center; margin-bottom: 7px; gap: 8px;
+    }
+    .ctrl label { flex: 0 0 82px; opacity: 0.6; font-size: 11px; }
+    .ctrl input[type=range] { flex: 1; accent-color: #999; height: 3px; }
+    .ctrl .val {
+      flex: 0 0 48px; text-align: right; font-size: 11px; color: #aef;
+      font-variant-numeric: tabular-nums; font-family: 'SF Mono', monospace;
+    }
+    .ctrl input[type=color] {
+      width: 30px; height: 20px; border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 4px; background: none; cursor: pointer; padding: 0;
+    }
+    .ctrl input[type=checkbox] {
+      width: 16px; height: 16px; accent-color: #ff8899; cursor: pointer;
+    }
+    .color-hex { font-size: 10px; color: #888; font-family: monospace; }
+
+    .btn-rand {
+      padding: 5px 0; border: 1px solid rgba(255,255,255,0.10);
+      background: rgba(255,255,255,0.04); color: #aaa; border-radius: 6px;
+      cursor: pointer; font-size: 11px; transition: all 0.2s;
+    }
+    .btn-rand:hover { background: rgba(255,255,255,0.1); color: #fff; }
+    .btn-rand.active { background: rgba(255,100,150,0.15); border-color: #ff8899; color: #fff; }
+    .preset-row { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
+    .preset-btn {
+      width: 24px; height: 24px; border-radius: 5px; border: 2px solid rgba(255,255,255,0.1);
+      cursor: pointer; transition: border-color 0.2s;
+    }
+    .preset-btn:hover { border-color: rgba(255,255,255,0.5); }
+    .preset-btn.active { border-color: #fff; }
+    .shape-btn {
+      width: 36px; height: 36px; border-radius: 8px; border: 2px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.04); font-size: 20px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.25s; padding: 0;
+    }
+    .shape-btn:hover { border-color: rgba(255,255,255,0.4); background: rgba(255,255,255,0.08); transform: scale(1.1); }
+    .shape-btn.active { border-color: #ff8899; background: rgba(255,100,150,0.15); box-shadow: 0 0 10px rgba(255,100,150,0.2); }
+    .file-row { margin-top: 6px; }
+    .file-row input[type=file] { display: none; }
+    .file-label {
+      display: inline-block; padding: 5px 12px; font-size: 11px;
+      border: 1px solid rgba(255,255,255,0.12); border-radius: 6px;
+      background: rgba(255,255,255,0.05); color: #aaa; cursor: pointer;
+    }
+    .file-label:hover { background: rgba(255,255,255,0.12); color: #fff; }
+    .file-name { font-size: 10px; color: #888; margin-left: 6px; }
+  </style>
+</head>
+<body>
+  <canvas id="c"></canvas>
+
+  <!-- ========== 底部工具栏 ========== -->
+  <div id="toolbar">
+    <div id="flyout">
+      <!-- 背景 -->
+      <div class="tool-section" data-tool="bg">
+        <div class="fp-title">🖼 背景</div>
+        <div class="preset-row" id="bgPresets">
+          <button class="preset-btn" data-bg="#ffffff" style="background:#fff" title="白"></button>
+          <button class="preset-btn" data-bg="#f5f0eb" style="background:#f5f0eb" title="暖白"></button>
+          <button class="preset-btn" data-bg="#1a1a2e" style="background:#1a1a2e" title="深蓝"></button>
+          <button class="preset-btn active" data-bg="#0a0a0a" style="background:#0a0a0a" title="黑"></button>
+          <button class="preset-btn" data-bg="#2d132c" style="background:#2d132c" title="暗紫"></button>
+          <button class="preset-btn" data-bg="#1b4332" style="background:#1b4332" title="暗绿"></button>
+          <button class="preset-btn" data-bg="#fce4ec" style="background:#fce4ec" title="浅粉"></button>
+          <button class="preset-btn" data-bg="#e8eaf6" style="background:#e8eaf6" title="浅蓝"></button>
+        </div>
+        <div class="ctrl"><label>自定义背景</label><input type="color" id="bgColor" value="#0a0a0a"><span class="val color-hex" id="bgColorV">#0a0a0a</span></div>
+      </div>
+      <!-- 基础参数 -->
+      <div class="tool-section" data-tool="params">
+        <div class="fp-title">🌸 基础参数</div>
+        <div class="ctrl"><label>花环层数</label><input type="range" id="rings" min="5" max="100" value="14" step="1"><span class="val" id="ringsV">14</span></div>
+        <div class="ctrl"><label>每层花瓣数</label><input type="range" id="petals" min="3" max="20" value="7" step="1"><span class="val" id="petalsV">7</span></div>
+      </div>
+      <!-- 配色 -->
+      <div class="tool-section" data-tool="colors">
+        <div class="fp-title">🎨 配色</div>
+        <div class="ctrl"><label>花瓣色 1</label><input type="color" id="color1" value="#ffffff"><span class="val color-hex" id="color1V">#ffffff</span></div>
+        <div class="ctrl"><label>花瓣色 2</label><input type="color" id="color2" value="#ff0000"><span class="val color-hex" id="color2V">#ff0000</span></div>
+        <div class="ctrl"><label>灯光色 1</label><input type="color" id="lightColor1" value="#6090ff"><span class="val color-hex" id="lightColor1V">#6090ff</span></div>
+        <div class="ctrl"><label>灯光色 2</label><input type="color" id="lightColor2" value="#ff9060"><span class="val color-hex" id="lightColor2V">#ff9060</span></div>
+        <button class="btn-rand" id="randColors" style="width:100%;margin-top:4px">🎲 随机配色</button>
+      </div>
+      <!-- 花瓣形状 -->
+      <div class="tool-section" data-tool="petal">
+        <div class="fp-title">🍃 花瓣形状</div>
+        <div class="fp-title" style="font-size:11px;margin-bottom:6px">⚡ 快速切换</div>
+        <div class="preset-row" id="shapePresets">
+          <button class="shape-btn active" data-shape="rose" title="玫瑰">🌹</button>
+          <button class="shape-btn" data-shape="lotus" title="荷花">🪷</button>
+          <button class="shape-btn" data-shape="chrysanthemum" title="菊花">🌼</button>
+          <button class="shape-btn" data-shape="cherry" title="樱花">🌸</button>
+          <button class="shape-btn" data-shape="tulip" title="郁金香">🌷</button>
+          <button class="shape-btn" data-shape="lily" title="百合">💮</button>
+        </div>
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:6px 0">
+        <div class="ctrl"><label>花瓣长度</label><input type="range" id="pSize" min="0.3" max="2.5" value="0.75" step="0.05"><span class="val" id="pSizeV">0.75</span></div>
+        <div class="ctrl"><label>横向弧度</label><input type="range" id="pDx" min="0.05" max="2" value="0.4" step="0.05"><span class="val" id="pDxV">0.40</span></div>
+        <div class="ctrl"><label>纵向弧度</label><input type="range" id="pDy" min="0" max="2" value="0.8" step="0.05"><span class="val" id="pDyV">0.80</span></div>
+        <div class="ctrl"><label>碗形深度</label><input type="range" id="bowlDepth" min="0" max="2" value="0.35" step="0.05"><span class="val" id="bowlDepthV">0.35</span></div>
+        <div class="ctrl"><label>尖端锥度</label><input type="range" id="taperPow" min="0.3" max="2" value="0.75" step="0.05"><span class="val" id="taperPowV">0.75</span></div>
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:6px 0">
+        <div class="fp-title" style="font-size:12px">🖌 贴图与纹理</div>
+        <div class="preset-row" id="texPresets">
+          <button class="btn-rand active" data-tex="none" style="flex:1">无</button>
+          <button class="btn-rand" data-tex="gradient" style="flex:1">渐变</button>
+          <button class="btn-rand" data-tex="vein" style="flex:1">脉络</button>
+          <button class="btn-rand" data-tex="noise" style="flex:1">噪点</button>
+        </div>
+        <div class="ctrl"><label>渐变色 1</label><input type="color" id="texGrad1" value="#ffffff"><span class="val color-hex" id="texGrad1V">#ffffff</span></div>
+        <div class="ctrl"><label>渐变色 2</label><input type="color" id="texGrad2" value="#ff4488"><span class="val color-hex" id="texGrad2V">#ff4488</span></div>
+        <div class="file-row"><label class="file-label" for="texFile">📂 上传贴图</label><input type="file" id="texFile" accept="image/*"><span class="file-name" id="texFileName">未选择</span></div>
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:6px 0">
+        <div class="fp-title" style="font-size:12px">🎨 着色器脉络</div>
+        <div class="ctrl"><label>整体强度</label><input type="range" id="veinStr" min="0" max="2" value="0.6" step="0.05"><span class="val" id="veinStrV">0.60</span></div>
+        <div class="ctrl"><label>整体粗细</label><input type="range" id="veinWidth" min="500" max="8000" value="3000" step="100"><span class="val" id="veinWidthV">3000</span></div>
+        <div class="ctrl"><label>脉络颜色</label><input type="color" id="veinColor" value="#2d5a1e"><span class="val color-hex" id="veinColorV">#2d5a1e</span></div>
+        <div class="ctrl"><label>主脉强度</label><input type="range" id="midribStr" min="0" max="1.5" value="0.7" step="0.05"><span class="val" id="midribStrV">0.70</span></div>
+        <div class="ctrl"><label>侧脉强度</label><input type="range" id="lateralStr" min="0" max="1.5" value="0.5" step="0.05"><span class="val" id="lateralStrV">0.50</span></div>
+        <div class="ctrl"><label>二级脉强度</label><input type="range" id="secStr" min="0" max="1" value="0.2" step="0.05"><span class="val" id="secStrV">0.20</span></div>
+        <div class="ctrl"><label>微纹强度</label><input type="range" id="microStr" min="0" max="0.5" value="0.06" step="0.01"><span class="val" id="microStrV">0.06</span></div>
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.06);margin:4px 0">
+        <div class="ctrl"><label>边缘透光</label><input type="range" id="edgeLight" min="0" max="1" value="0.2" step="0.05"><span class="val" id="edgeLightV">0.20</span></div>
+        <div class="ctrl"><label>色相偏移</label><input type="range" id="hueShift" min="0" max="1" value="0" step="0.005"><span class="val" id="hueShiftV">0.000</span></div>
+      </div>
+      <!-- 花朵形态 -->
+      <div class="tool-section" data-tool="flower">
+        <div class="fp-title">🌺 花朵形态</div>
+        <div class="ctrl"><label>散开半径</label><input type="range" id="maxRadius" min="0" max="5" value="0.1" step="0.1"><span class="val" id="maxRadiusV">0.1</span></div>
+        <div class="ctrl"><label>最大缩放</label><input type="range" id="maxScale" min="0.5" max="5" value="2.2" step="0.1"><span class="val" id="maxScaleV">2.2</span></div>
+        <div class="ctrl"><label>展开角度</label><input type="range" id="startRx" min="0.1" max="3.14159" value="2.42" step="0.01"><span class="val" id="startRxV">2.42</span></div>
+        <div class="ctrl"><label>螺旋扭转</label><input type="range" id="zOffsetCoef" min="0" max="10" value="0.50" step="0.05"><span class="val" id="zOffsetCoefV">0.50</span></div>
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:8px 0">
+        <div class="fp-title" style="font-size:12px">🔧 防穿模</div>
+        <div class="ctrl"><label>层间 Z 间距</label><input type="range" id="layerGap" min="0" max="0.5" value="0.005" step="0.005"><span class="val" id="layerGapV">0.005</span></div>
+        <div class="ctrl"><label>缩放衰减</label><input type="range" id="scaleDecay" min="0" max="1" value="0.40" step="0.01"><span class="val" id="scaleDecayV">0.40</span></div>
+        <div class="ctrl"><label>内层收缩</label><input type="range" id="innerShrink" min="0" max="1" value="0.90" step="0.05"><span class="val" id="innerShrinkV">0.90</span></div>
+      </div>
+      <!-- 材质 -->
+      <div class="tool-section" data-tool="mat">
+        <div class="fp-title">✨ 材质</div>
+        <div class="ctrl"><label>金属度</label><input type="range" id="metalness" min="0" max="1" value="0.00" step="0.01"><span class="val" id="metalnessV">0.00</span></div>
+        <div class="ctrl"><label>粗糙度</label><input type="range" id="roughness" min="0" max="1" value="0.43" step="0.01"><span class="val" id="roughnessV">0.43</span></div>
+        <div class="ctrl"><label>透光度</label><input type="range" id="transmission" min="0" max="1" value="0.17" step="0.01"><span class="val" id="transmissionV">0.17</span></div>
+        <div class="ctrl"><label>丝绒光泽</label><input type="range" id="sheen" min="0" max="1" value="0.47" step="0.01"><span class="val" id="sheenV">0.47</span></div>
+        <div class="ctrl"><label>丝绒色</label><input type="color" id="sheenColor" value="#ff8899"><span class="val color-hex" id="sheenColorV">#ff8899</span></div>
+        <div class="ctrl"><label>丝绒粗糙度</label><input type="range" id="sheenRoughness" min="0" max="1" value="0.48" step="0.01"><span class="val" id="sheenRoughnessV">0.48</span></div>
+        <div class="ctrl"><label>清漆</label><input type="range" id="clearcoat" min="0" max="1" value="0.1" step="0.01"><span class="val" id="clearcoatV">0.10</span></div>
+      </div>
+      <!-- 卷曲变形 -->
+      <div class="tool-section" data-tool="curl">
+        <div class="fp-title">🌀 卷曲变形</div>
+        <div class="ctrl"><label>基础卷曲</label><input type="range" id="baseCurl" min="0" max="4" value="1.5" step="0.1"><span class="val" id="baseCurlV">1.5</span></div>
+        <div class="ctrl"><label>卷曲随机</label><input type="range" id="curlVar" min="0" max="2" value="0.15" step="0.05"><span class="val" id="curlVarV">0.15</span></div>
+        <div class="ctrl"><label>基础扭转</label><input type="range" id="baseTwist" min="0" max="3" value="0.4" step="0.1"><span class="val" id="baseTwistV">0.4</span></div>
+        <div class="ctrl"><label>扭转随机</label><input type="range" id="twistVar" min="0" max="2" value="0.00" step="0.05"><span class="val" id="twistVarV">0.00</span></div>
+      </div>
+      <!-- 花瓣掉落 -->
+      <div class="tool-section" data-tool="fall">
+        <div class="fp-title">🍂 花瓣掉落</div>
+        <div class="ctrl"><label>掉落开关</label><input type="checkbox" id="fallEnabled"><span class="val" style="flex:0 0 auto;font-size:10px;color:#888">勾选启用</span></div>
+        <div class="ctrl"><label>掉落数量</label><input type="range" id="fallCount" min="0" max="60" value="20" step="1"><span class="val" id="fallCountV">20</span></div>
+        <div class="ctrl"><label>掉落速度</label><input type="range" id="fallSpeed" min="0.1" max="3" value="0.8" step="0.1"><span class="val" id="fallSpeedV">0.8</span></div>
+        <div class="ctrl"><label>飘散范围</label><input type="range" id="fallSpread" min="0.5" max="8" value="3" step="0.5"><span class="val" id="fallSpreadV">3.0</span></div>
+        <div class="ctrl"><label>旋转速度</label><input type="range" id="fallSpin" min="0" max="5" value="2" step="0.1"><span class="val" id="fallSpinV">2.0</span></div>
+        <div class="ctrl"><label>摇摆幅度</label><input type="range" id="fallSway" min="0" max="3" value="1" step="0.1"><span class="val" id="fallSwayV">1.0</span></div>
+        <div class="ctrl"><label>大小范围</label><input type="range" id="fallScale" min="0.2" max="2" value="0.7" step="0.1"><span class="val" id="fallScaleV">0.7</span></div>
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:6px 0">
+        <div class="fp-title" style="font-size:12px">🌬️ 风力模拟</div>
+        <div class="ctrl"><label>启用风力</label><input type="checkbox" id="windEnabled" checked><span class="val" style="flex:0 0 auto;font-size:10px;color:#888">模拟自然风</span></div>
+        <div class="ctrl"><label>风力 X</label><input type="range" id="windX" min="-3" max="3" value="0.5" step="0.1"><span class="val" id="windXV">0.5</span></div>
+        <div class="ctrl"><label>风力 Y</label><input type="range" id="windY" min="-3" max="3" value="0.3" step="0.1"><span class="val" id="windYV">0.3</span></div>
+        <div class="ctrl"><label>风力 Z</label><input type="range" id="windZ" min="-3" max="3" value="0" step="0.1"><span class="val" id="windZV">0.0</span></div>
+        <div class="ctrl"><label>阵风强度</label><input type="range" id="gustStr" min="0" max="2" value="0.5" step="0.1"><span class="val" id="gustStrV">0.5</span></div>
+        <div class="ctrl"><label>阵风频率</label><input type="range" id="gustFreq" min="0.1" max="3" value="0.8" step="0.1"><span class="val" id="gustFreqV">0.8</span></div>
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:6px 0">
+        <div class="fp-title" style="font-size:12px">✨ 淡入淡出</div>
+        <div class="ctrl"><label>启用渐变</label><input type="checkbox" id="fadeEnabled" checked><span class="val" style="flex:0 0 auto;font-size:10px;color:#888">柔和出现/消失</span></div>
+        <div class="ctrl"><label>淡入时长</label><input type="range" id="fadeIn" min="0.1" max="3" value="0.8" step="0.1"><span class="val" id="fadeInV">0.8</span></div>
+        <div class="ctrl"><label>淡出时长</label><input type="range" id="fadeOut" min="0.1" max="3" value="1.2" step="0.1"><span class="val" id="fadeOutV">1.2</span></div>
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:6px 0">
+        <div class="fp-title" style="font-size:12px">📍 出生位置</div>
+        <div style="display:flex;gap:6px;margin-bottom:8px">
+          <button id="fallDragBtn" class="btn-rand" style="flex:1;padding:6px 0;font-size:12px">🎯 XYZ 轴拖拽定位</button>
+        </div>
+        <div class="ctrl"><label>中心 X</label><input type="range" id="fallOriginX" min="-8" max="8" value="0" step="0.1"><span class="val" id="fallOriginXV">0.0</span></div>
+        <div class="ctrl"><label>中心 Y</label><input type="range" id="fallOriginY" min="-8" max="8" value="0" step="0.1"><span class="val" id="fallOriginYV">0.0</span></div>
+        <div class="ctrl"><label>中心 Z</label><input type="range" id="fallOriginZ" min="-5" max="10" value="1" step="0.1"><span class="val" id="fallOriginZV">1.0</span></div>
+        <div class="ctrl"><label>下落距离</label><input type="range" id="fallDrop" min="2" max="12" value="6" step="0.5"><span class="val" id="fallDropV">6.0</span></div>
+      </div>
+      <!-- 灯光 -->
+      <div class="tool-section" data-tool="light">
+        <div class="fp-title">💡 灯光 · 全局</div>
+        <div class="ctrl"><label>环境光强度</label><input type="range" id="ambientInt" min="0" max="5" value="4.0" step="0.1"><span class="val" id="ambientIntV">4.0</span></div>
+        <div class="ctrl"><label>泛光强度</label><input type="range" id="bloomStr" min="0" max="2" value="0.85" step="0.05"><span class="val" id="bloomStrV">0.85</span></div>
+        <div class="ctrl"><label>曝光度</label><input type="range" id="exposure" min="0.3" max="3" value="2.1" step="0.1"><span class="val" id="exposureV">2.1</span></div>
+        <div class="ctrl"><label>显示灯光辅助</label><input type="checkbox" id="showHelpers"><span class="val" style="flex:0 0 auto;font-size:10px;color:#888">勾选后常驻显示</span></div>
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:8px 0">
+        <div class="fp-title" style="font-size:12px">🔦 聚光灯 1</div>
+        <div class="ctrl"><label>强度</label><input type="range" id="spot1Int" min="0" max="300" value="80" step="5"><span class="val" id="spot1IntV">80</span></div>
+        <div class="ctrl"><label>X 位置</label><input type="range" id="spot1X" min="-10" max="10" value="0" step="0.1"><span class="val" id="spot1XV">0.0</span></div>
+        <div class="ctrl"><label>Y 位置</label><input type="range" id="spot1Y" min="-10" max="10" value="-1" step="0.1"><span class="val" id="spot1YV">-1.0</span></div>
+        <div class="ctrl"><label>Z 位置</label><input type="range" id="spot1Z" min="-10" max="10" value="7.8" step="0.1"><span class="val" id="spot1ZV">7.8</span></div>
+        <div class="ctrl"><label>锥角 (°)</label><input type="range" id="spot1Angle" min="5" max="90" value="30" step="1"><span class="val" id="spot1AngleV">30</span></div>
+        <div class="ctrl"><label>半影衰减</label><input type="range" id="spot1Penumbra" min="0" max="1" value="0.5" step="0.05"><span class="val" id="spot1PenumbraV">0.50</span></div>
+        <div class="ctrl"><label>衰减距离</label><input type="range" id="spot1Distance" min="0" max="50" value="0" step="1"><span class="val" id="spot1DistanceV">0</span></div>
+        <hr style="border:none;border-top:1px solid rgba(255,255,255,0.08);margin:8px 0">
+        <div class="fp-title" style="font-size:12px">🔦 聚光灯 2</div>
+        <div class="ctrl"><label>强度</label><input type="range" id="spot2Int" min="0" max="300" value="80" step="5"><span class="val" id="spot2IntV">80</span></div>
+        <div class="ctrl"><label>X 位置</label><input type="range" id="spot2X" min="-10" max="10" value="0" step="0.1"><span class="val" id="spot2XV">0.0</span></div>
+        <div class="ctrl"><label>Y 位置</label><input type="range" id="spot2Y" min="-10" max="10" value="1" step="0.1"><span class="val" id="spot2YV">1.0</span></div>
+        <div class="ctrl"><label>Z 位置</label><input type="range" id="spot2Z" min="-10" max="10" value="-3" step="0.1"><span class="val" id="spot2ZV">-3.0</span></div>
+        <div class="ctrl"><label>锥角 (°)</label><input type="range" id="spot2Angle" min="5" max="90" value="30" step="1"><span class="val" id="spot2AngleV">30</span></div>
+        <div class="ctrl"><label>半影衰减</label><input type="range" id="spot2Penumbra" min="0" max="1" value="0.5" step="0.05"><span class="val" id="spot2PenumbraV">0.50</span></div>
+        <div class="ctrl"><label>衰减距离</label><input type="range" id="spot2Distance" min="0" max="50" value="0" step="1"><span class="val" id="spot2DistanceV">0</span></div>
+      </div>
+    </div>
+    <!-- 圆形按钮栏 -->
+    <div id="btnBar">
+      <button class="tbtn" data-tool="bg">🖼<span class="tbtn-label">背景</span></button>
+      <button class="tbtn" data-tool="params">🌸<span class="tbtn-label">参数</span></button>
+      <button class="tbtn" data-tool="colors">🎨<span class="tbtn-label">配色</span></button>
+      <button class="tbtn" data-tool="petal">🍃<span class="tbtn-label">花瓣</span></button>
+      <button class="tbtn" data-tool="flower">🌺<span class="tbtn-label">形态</span></button>
+      <button class="tbtn" data-tool="mat">✨<span class="tbtn-label">材质</span></button>
+      <button class="tbtn" data-tool="curl">🌀<span class="tbtn-label">卷曲</span></button>
+      <button class="tbtn" data-tool="fall">🍂<span class="tbtn-label">掉落</span></button>
+      <button class="tbtn" data-tool="light">💡<span class="tbtn-label">灯光</span></button>
+    </div>
+  </div>
+
+  <!-- ========== 依赖 ========== -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+  import * as THREE from 'three';
+  import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+  import { TransformControls } from 'three/addons/controls/TransformControls.js';
+  import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+  import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+  import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+  /* ===========================================================
+     工具栏切换逻辑 (手风琴: 同时只开一个)
+  =========================================================== */
+  let activeTool = null;
+  const flyout = document.getElementById('flyout');
+  const allSections = document.querySelectorAll('.tool-section');
+  const allBtns = document.querySelectorAll('.tbtn');
+
+  function setLightPanelOpen(open) {
+    if (typeof lightPanelOpen !== 'undefined') {
+      lightPanelOpen = open;
+      updateHelperVisibility();
+    }
+  }
+
+  allBtns.forEach(btn => {
+    btn.addEventListener('click', () => {
+      const tool = btn.dataset.tool;
+      if (activeTool === tool) {
+        // 关闭当前
+        flyout.classList.remove('open');
+        btn.classList.remove('active');
+        if (activeTool === 'light') setLightPanelOpen(false);
+        activeTool = null;
+      } else {
+        // 关闭旧面板的灯光联动
+        if (activeTool === 'light') setLightPanelOpen(false);
+        // 切换到新面板
+        allBtns.forEach(b => b.classList.remove('active'));
+        allSections.forEach(s => s.classList.remove('active'));
+        btn.classList.add('active');
+        document.querySelector(`.tool-section[data-tool="${tool}"]`).classList.add('active');
+        flyout.classList.add('open');
+        activeTool = tool;
+        if (tool === 'light') setLightPanelOpen(true);
+      }
+    });
+  });
+
+  // 点击画布关闭面板 (拖拽模式下不关闭)
+  document.getElementById('c').addEventListener('pointerdown', () => {
+    if (typeof dragMode !== 'undefined' && dragMode) return;
+    if (typeof gizmoDragging !== 'undefined' && gizmoDragging) return;
+    if (activeTool) {
+      if (activeTool === 'light') setLightPanelOpen(false);
+      flyout.classList.remove('open');
+      allBtns.forEach(b => b.classList.remove('active'));
+      activeTool = null;
+    }
+  });
+
+  /* ===========================================================
+     花瓣几何体 (ExtrudeGeometry + quadraticCurveTo)
+  =========================================================== */
+  function createPetalGeometry(size, dx, dy) {
+    const shape = new THREE.Shape();
+    shape.moveTo(0, 0);
+    shape.quadraticCurveTo(dx, dy, 0, size);
+    shape.quadraticCurveTo(-dx, dy, 0, 0);
+    return new THREE.ExtrudeGeometry(shape, {
+      curveSegments: 24,
+      steps: 1,
+      depth: 0.005,
+      bevelEnabled: true,
+      bevelThickness: 0.005,
+      bevelSize: 0.01,
+      bevelOffset: 0,
+      bevelSegments: 10,
+    });
+  }
+
+  /* ===========================================================
+     颜色插值工具 (替代 chroma-js)
+  =========================================================== */
+  function hexToRgb(hex) {
+    const h = hex.replace('#', '');
+    return [parseInt(h.substring(0,2),16)/255, parseInt(h.substring(2,4),16)/255, parseInt(h.substring(4,6),16)/255];
+  }
+  function rgbToHex(r, g, b) {
+    const f = v => Math.round(Math.max(0, Math.min(1, v)) * 255).toString(16).padStart(2, '0');
+    return '#' + f(r) + f(g) + f(b);
+  }
+  function lerpColor(hex1, hex2, t) {
+    const a = hexToRgb(hex1), b = hexToRgb(hex2);
+    return [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t];
+  }
+  /** 3-stop scale: color1 → color2 → color1 */
+  function colorScale(hex1, hex2, t) {
+    if (t < 0.5) return lerpColor(hex1, hex2, t * 2);
+    return lerpColor(hex2, hex1, (t - 0.5) * 2);
+  }
+  function randomHex() {
+    return '#' + Math.floor(Math.random() * 0xffffff).toString(16).padStart(6, '0');
+  }
+
+  /* ===========================================================
+     场景初始化
+  =========================================================== */
+  const canvas = document.getElementById('c');
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+  renderer.setSize(innerWidth, innerHeight);
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 2.1;
+
+  const scene = new THREE.Scene();
+  scene.background = new THREE.Color('#0a0a0a');
+
+  const camera = new THREE.PerspectiveCamera(50, innerWidth / innerHeight, 0.1, 100);
+  camera.position.set(0, -6, 6);
+  camera.lookAt(0, 0, 0);
+
+  const controls = new OrbitControls(camera, canvas);
+  controls.enableDamping = true;
+  controls.dampingFactor = 0.08;
+
+  /* ---- 灯光 ---- */
+  const ambient = new THREE.AmbientLight(0x808080, 4);
+  scene.add(ambient);
+
+  const spot1 = new THREE.SpotLight(0x6090ff, 80);
+  spot1.position.set(0, -1, 7.8);
+  spot1.angle = Math.PI / 6;          // 30°
+  spot1.penumbra = 0.5;
+  spot1.castShadow = true;
+  spot1.shadow.mapSize.set(1024, 1024);
+  scene.add(spot1);
+  scene.add(spot1.target);             // target 默认 (0,0,0)
+
+  const spot2 = new THREE.SpotLight(0xff9060, 80);
+  spot2.position.set(0, 1, -3);
+  spot2.angle = Math.PI / 6;
+  spot2.penumbra = 0.5;
+  spot2.castShadow = true;
+  spot2.shadow.mapSize.set(1024, 1024);
+  scene.add(spot2);
+  scene.add(spot2.target);
+
+  /* ---- 灯光可视化 Helper ---- */
+  const helper1 = new THREE.SpotLightHelper(spot1);
+  const helper2 = new THREE.SpotLightHelper(spot2);
+  // 小球标识灯光位置 (更直观)
+  const bulbGeo = new THREE.SphereGeometry(0.08, 16, 16);
+  const bulbMat1 = new THREE.MeshBasicMaterial({ color: 0x6090ff });
+  const bulbMat2 = new THREE.MeshBasicMaterial({ color: 0xff9060 });
+  const bulb1 = new THREE.Mesh(bulbGeo, bulbMat1);
+  const bulb2 = new THREE.Mesh(bulbGeo, bulbMat2);
+  scene.add(helper1, helper2, bulb1, bulb2);
+
+  let showHelpers = false;       // 默认隐藏
+  let lightPanelOpen = false;    // 灯光面板是否打开
+  function updateHelperVisibility() {
+    const vis = showHelpers || lightPanelOpen;
+    helper1.visible = helper2.visible = bulb1.visible = bulb2.visible = vis;
+  }
+  updateHelperVisibility();      // 初始隐藏
+  function syncHelpers() {
+    bulb1.position.copy(spot1.position);
+    bulb2.position.copy(spot2.position);
+    bulbMat1.color.copy(spot1.color);
+    bulbMat2.color.copy(spot2.color);
+    helper1.update();
+    helper2.update();
+  }
+  syncHelpers();
+
+  /* ---- 后处理 (Bloom) ---- */
+  const composer = new EffectComposer(renderer);
+  composer.addPass(new RenderPass(scene, camera));
+  const bloomPass = new UnrealBloomPass(
+    new THREE.Vector2(innerWidth, innerHeight), 0.85, 0.4, 0.85
+  );
+  composer.addPass(bloomPass);
+
+  /* ---- Resize ---- */
+  window.addEventListener('resize', () => {
+    camera.aspect = innerWidth / innerHeight;
+    camera.updateProjectionMatrix();
+    renderer.setSize(innerWidth, innerHeight);
+    composer.setSize(innerWidth, innerHeight);
+  });
+
+  /* ===========================================================
+     参数状态
+  =========================================================== */
+  const MAX_RINGS = 100, MAX_PETALS = 20;
+  const MAX_COUNT = MAX_RINGS * MAX_PETALS;
+
+  const P = {
+    rings: 14,
+    petals: 7,
+    color1: '#ffffff',
+    color2: '#ff0000',
+    lightColor1: '#6090ff',
+    lightColor2: '#ff9060',
+    size: 0.75, dx: 0.40, dy: 0.80,
+    // 花朵形态
+    maxRadius: 0.1,
+    maxScale: 2.2,
+    startRx: 2.42,
+    zOffsetCoef: 0.50,
+    // 材质
+    metalness: 0.00,
+    roughness: 0.43,
+    transmission: 0.17,
+    sheen: 0.47,
+    sheenColor: '#ff8899',
+    sheenRoughness: 0.48,
+    clearcoat: 0.10,
+    // 卷曲变形
+    baseCurl: 1.5,
+    curlVar: 0.15,
+    baseTwist: 0.4,
+    twistVar: 0.00,
+    // 防穿模
+    layerGap: 0.005,
+    scaleDecay: 0.40,
+    innerShrink: 0.90,
+    // 花瓣高级形态
+    bowlDepth: 0.35,
+    veinStr: 0.6,
+    veinWidth: 3000,
+    veinColor: '#2d5a1e',
+    midribStr: 0.7,
+    lateralStr: 0.5,
+    secStr: 0.2,
+    microStr: 0.06,
+    taperPow: 0.75,
+    edgeLight: 0.2,
+    hueShift: 0,
+  };
+
+  /* ===========================================================
+     InstancedMesh + MeshPhysicalMaterial + 自定义卷曲 Shader
+  =========================================================== */
+  let petalGeo = createPetalGeometry(P.size, P.dx, P.dy);
+
+  const petalMat = new THREE.MeshPhysicalMaterial({
+    metalness: P.metalness,
+    roughness: P.roughness,
+    transmission: P.transmission,
+    thickness: 0.5,
+    sheen: P.sheen,
+    sheenColor: new THREE.Color(P.sheenColor),
+    sheenRoughness: P.sheenRoughness,
+    clearcoat: P.clearcoat,
+    side: THREE.DoubleSide,
+  });
+
+  // 🌀 注入自定义着色器: 卷曲 & 扭转 + 碗形 + 脉络 + 边缘透光 + 色相偏移
+  // 需要可动态更新的 uniforms
+  function hexToVec3(hex) {
+    const h = hex.replace('#', '');
+    return new THREE.Vector3(
+      parseInt(h.substring(0,2),16)/255,
+      parseInt(h.substring(2,4),16)/255,
+      parseInt(h.substring(4,6),16)/255
+    );
+  }
+
+  const shaderUniforms = {
+    uBowlDepth:  { value: P.bowlDepth },
+    uVeinStr:    { value: P.veinStr },
+    uVeinWidth:  { value: P.veinWidth },
+    uVeinColor:  { value: hexToVec3(P.veinColor) },
+    uMidribStr:  { value: P.midribStr },
+    uLateralStr: { value: P.lateralStr },
+    uSecStr:     { value: P.secStr },
+    uMicroStr:   { value: P.microStr },
+    uTaperPow:   { value: P.taperPow },
+    uEdgeLight:  { value: P.edgeLight },
+    uHueShift:   { value: P.hueShift },
+    uPetalSize:  { value: P.size },
+    uPetalDx:    { value: P.dx },
+  };
+
+  petalMat.onBeforeCompile = (shader) => {
+    // 注入 uniforms
+    Object.assign(shader.uniforms, shaderUniforms);
+
+    // ---- 顶点着色器 ----
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <common>',
+      `#include <common>
+      attribute float aCurl;
+      attribute float aTwist;
+      uniform float uBowlDepth;
+      uniform float uTaperPow;
+      uniform float uPetalSize;
+      uniform float uPetalDx;
+      varying vec2 vPetalUv;
+      varying float vNY;`
+    );
+    // 法线变形
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <defaultnormal_vertex>',
+      `{
+        float yN = position.y;
+        float caN = aCurl * yN * yN;
+        float ccN = cos(caN), ssN = sin(caN);
+        objectNormal.yz = vec2(objectNormal.y*ccN - objectNormal.z*ssN, objectNormal.y*ssN + objectNormal.z*ccN);
+        float taN = aTwist * yN;
+        float tcN = cos(taN), tsN = sin(taN);
+        objectNormal.xz = vec2(objectNormal.x*tcN - objectNormal.z*tsN, objectNormal.x*tsN + objectNormal.z*tcN);
+      }
+      #include <defaultnormal_vertex>`
+    );
+    // 顶点位置变形: 锥度 + 碗形 + 卷曲 + 扭转
+    shader.vertexShader = shader.vertexShader.replace(
+      '#include <begin_vertex>',
+      `#include <begin_vertex>
+      {
+        // ★ 直接用顶点位置计算花瓣 UV (不依赖 ExtrudeGeometry 自带 UV)
+        // position.y = 0(基部) → size(尖端), position.x = -dx → +dx
+        float petalH = max(position.y, 0.0);
+        float nY = clamp(petalH / max(uPetalSize, 0.1), 0.0, 1.0);
+        float nX = clamp(position.x / max(uPetalDx, 0.05) * 0.5 + 0.5, 0.0, 1.0);
+        vNY = nY;
+        vPetalUv = vec2(nX, nY);
+
+        // ★ 锥度: 花瓣基部窄→中间宽→尖端窄 (sin 包络)
+        float sinNY = sin(nY * 3.14159265);
+        float taper = pow(max(sinNY, 0.001), uTaperPow); // max 防 pow(0,x) = NaN
+        transformed.x *= mix(1.0, taper, 0.5);
+
+        // ★ 碗形: 横向弯曲产生杯状
+        float bowlX = transformed.x;
+        transformed.z += bowlX * bowlX * uBowlDepth * max(sinNY, 0.0);
+
+        // ★ 微细纹理波浪 (像真花瓣的褶皱)
+        transformed.z += sin(transformed.x * 15.0) * 0.015 * nY;
+
+        float y = transformed.y;
+        // 卷曲: 绕 X 轴旋转, 尖端更强 (y²)
+        float curlAng = aCurl * y * y;
+        float cc = cos(curlAng), ss = sin(curlAng);
+        float ny = y * cc - transformed.z * ss;
+        float nz = y * ss + transformed.z * cc;
+        transformed.y = ny;
+        transformed.z = nz;
+        // 扭转: 绕 Y 轴旋转
+        float twistAng = aTwist * y;
+        float tc = cos(twistAng), ts = sin(twistAng);
+        float ox = transformed.x;
+        transformed.x = ox * tc - transformed.z * ts;
+        transformed.z = ox * ts + transformed.z * tc;
+      }`
+    );
+
+    // ---- 片元着色器: 真实脉络 + 边缘透光 + 色相偏移 ----
+    // ★ 在 color_fragment 之后注入 (tone mapping 之前), 避免黑块
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <common>',
+      `#include <common>
+      uniform float uVeinStr;
+      uniform float uVeinWidth;
+      uniform vec3  uVeinColor;
+      uniform float uMidribStr;
+      uniform float uLateralStr;
+      uniform float uSecStr;
+      uniform float uMicroStr;
+      uniform float uEdgeLight;
+      uniform float uHueShift;
+      varying vec2 vPetalUv;
+      varying float vNY;
+
+      // 色相旋转 (Rodrigues)
+      vec3 hueRotate(vec3 c, float h) {
+        float a = h * 6.2831853;
+        float co = cos(a), si = sin(a);
+        vec3 k = vec3(0.57735);
+        return clamp(c * co + cross(k, c) * si + k * dot(k, c) * (1.0 - co), 0.0, 1.0);
+      }
+
+      // ★ 真实花瓣脉络 — 细线放射状 (粗细由 uVeinWidth 控制)
+      // vx: 0(左缘)→1(右缘), vy: 0(基部)→1(尖端)
+      // w: 高斯锐度 (越大越细), 推荐 1000~6000
+      float veinLine(float d, float w) {
+        return exp(-d * d * w);
+      }
+
+      float petalVein(float vx, float vy, float w) {
+        float cx = vx - 0.5;       // 中心化 -0.5→+0.5
+        float absCx = abs(cx);
+        float sc = sign(cx + 0.001); // 避免 sign(0)
+
+        // === 1. 主脉 (midrib): 花瓣中轴极细亮线 ===
+        float midrib = veinLine(absCx, w * 3.0) * uMidribStr;
+
+        // === 2. 一级侧脉: 8~12 条从主脉向两侧斜向发散 ===
+        //     每条侧脉是一条从 (cx=0, vy_i) 出发斜向外延伸的直线
+        //     在 UV 空间表现为: 对于给定 vy, 侧脉的 x 位置 = slope * (vy - vy_i)
+        float lat = 0.0;
+        float numVeins = 10.0;
+        for (float i = 1.0; i <= 10.0; i += 1.0) {
+          float vyStart = i / (numVeins + 1.0);  // 侧脉起点沿 vy 均匀分布
+          float progress = max(vy - vyStart, 0.0);  // 从起点开始延伸
+          float slope = 0.6 + i * 0.04;  // 越上面的脉越陡
+          // 左侧 + 右侧各一条
+          float xExpected = progress * slope;
+          float dL = abs(absCx - xExpected);
+          // 侧脉在起点附近最亮, 延伸后变淡
+          float fade = exp(-progress * 3.0) * smoothstep(vyStart - 0.02, vyStart + 0.02, vy);
+          lat += veinLine(dL, w * 0.8) * fade * uLateralStr;
+        }
+
+        // === 3. 二级细脉: 更密但更淡 ===
+        float sec = 0.0;
+        for (float i = 0.5; i <= 10.5; i += 1.0) {
+          float vyStart = i / 11.0;
+          float progress = max(vy - vyStart, 0.0);
+          float slope = 0.8 + i * 0.03;
+          float dL = abs(absCx - progress * slope);
+          float fade = exp(-progress * 4.5) * smoothstep(vyStart - 0.01, vyStart + 0.01, vy);
+          sec += veinLine(dL, w * 0.5) * fade * uSecStr;
+        }
+
+        // === 4. 纵向微纹 ===
+        float micro = veinLine(mod(cx * 40.0, 1.0) - 0.5, w * 0.02) * uMicroStr;
+
+        // 衰减
+        float yFade = smoothstep(0.0, 0.08, vy) * smoothstep(1.0, 0.65, vy);
+        float xFade = smoothstep(0.0, 0.08, 0.5 - absCx);
+
+        return (midrib + lat + sec + micro) * yFade * xFade;
+      }`
+    );
+
+    // 在 color_fragment 之后注入效果 (tone mapping / encoding 之前)
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <color_fragment>',
+      `#include <color_fragment>
+      {
+        float vy = clamp(vPetalUv.y, 0.0, 1.0);
+        float vx = clamp(vPetalUv.x, 0.0, 1.0);
+
+        // ★ 真实脉络: 细线放射状, 颜色可控
+        float vein = petalVein(vx, vy, uVeinWidth) * uVeinStr;
+        // 用脉络颜色混合 (vein=0 时不影响, vein=1 时完全替换为脉络色)
+        vec3 veinCol = uVeinColor;
+        diffuseColor.rgb = mix(diffuseColor.rgb, veinCol, clamp(vein * 0.8, 0.0, 0.7));
+
+        // ★ 边缘透光: 花瓣边缘逆光更亮 (薄处透光)
+        float edgeDist = min(vx, 1.0 - vx);
+        float edgeFade = smoothstep(0.0, 0.15, edgeDist);
+        diffuseColor.rgb *= mix(1.0 + uEdgeLight * 0.4, 1.0, edgeFade);
+
+        // ★ 基部到尖端自然渐变 (基部深→尖端浅)
+        diffuseColor.rgb = mix(diffuseColor.rgb * 0.92, diffuseColor.rgb * 1.05 + 0.02, vy);
+
+        // ★ 色相偏移
+        if (uHueShift > 0.001) {
+          diffuseColor.rgb = hueRotate(diffuseColor.rgb, uHueShift);
+        }
+      }`
+    );
+  };
+
+  // 创建 InstancedMesh
+  const mesh = new THREE.InstancedMesh(petalGeo, petalMat, MAX_COUNT);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  mesh.count = P.rings * P.petals;
+  scene.add(mesh);
+
+  const dummy = new THREE.Object3D();
+  const tmpColor = new THREE.Color();
+
+  // 🌀 逐实例卷曲/扭转属性 (动态更新)
+  const curlArray  = new Float32Array(MAX_COUNT);
+  const twistArray = new Float32Array(MAX_COUNT);
+  const randCurl   = new Float32Array(MAX_COUNT);
+  const randTwist  = new Float32Array(MAX_COUNT);
+  for (let i = 0; i < MAX_COUNT; i++) {
+    randCurl[i]  = (Math.random() - 0.5) * 2;
+    randTwist[i] = (Math.random() - 0.5) * 2;
+  }
+  const curlAttr  = new THREE.InstancedBufferAttribute(curlArray, 1).setUsage(THREE.DynamicDrawUsage);
+  const twistAttr = new THREE.InstancedBufferAttribute(twistArray, 1).setUsage(THREE.DynamicDrawUsage);
+  mesh.geometry.setAttribute('aCurl', curlAttr);
+  mesh.geometry.setAttribute('aTwist', twistAttr);
+
+  /* ---- 颜色更新 ---- */
+  function updateColors() {
+    const { rings: N1, petals: N2 } = P;
+    for (let i = 0; i < N1; i++) {
+      for (let j = 0; j < N2; j++) {
+        const n = i * N2 + j;
+        const rgb = colorScale(P.color1, P.color2, j / N2);
+        tmpColor.setRGB(rgb[0], rgb[1], rgb[2]);
+        mesh.setColorAt(n, tmpColor);
+      }
+    }
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  }
+  updateColors();
+
+  /* ---- 矩阵更新 (核心动画) ---- */
+  function updateMatrices() {
+    const { rings: N1, petals: N2 } = P;
+    const t = (Date.now() * 0.00005) % 1;
+    const da = 2 * Math.PI / N2;
+    const drx = 2 * P.startRx / N1;
+
+    for (let i = 0; i < N1; i++) {
+      const k = (i + t * N1) % N1;
+      const tcoef = Math.sin(Math.PI * k / N1);
+      const zOffset = i * P.zOffsetCoef * Math.PI / N1;
+      const r = tcoef * P.maxRadius;
+
+      // ★ 防穿模: 层间 Z 间距 —— 越外层 Z 越高, 像碗一样展开
+      const zLift = i * P.layerGap;
+
+      // ★ 防穿模: 缩放衰减 —— 外层略小, 内层略小
+      const decayFactor = 1 - P.scaleDecay * (1 - tcoef);
+      // ★ 防穿模: 内层收缩 —— 避免花蕊处挤成一团
+      const shrinkFactor = tcoef < 0.15 ? THREE.MathUtils.lerp(1 - P.innerShrink, 1, tcoef / 0.15) : 1;
+      const scale = tcoef * P.maxScale * decayFactor * shrinkFactor;
+
+      for (let j = 0; j < N2; j++) {
+        const n = i * N2 + j;
+        const a = da * j + zOffset;
+        dummy.position.set(r * Math.cos(a), r * Math.sin(a), zLift);
+        dummy.rotation.set(P.startRx - k * drx, 0, a - Math.PI / 2, 'ZXY');
+        dummy.scale.set(scale, scale, scale);
+        dummy.updateMatrix();
+        mesh.setMatrixAt(n, dummy.matrix);
+
+        // 逐实例卷曲: 新生花瓣(tcoef小)卷曲大, 盛开(tcoef大)卷曲小
+        curlArray[n]  = P.baseCurl * (1 - tcoef * 0.6) + randCurl[n] * P.curlVar;
+        twistArray[n] = P.baseTwist * tcoef * 0.8 + randTwist[n] * P.twistVar;
+      }
+    }
+    mesh.instanceMatrix.needsUpdate = true;
+    curlAttr.needsUpdate = true;
+    twistAttr.needsUpdate = true;
+  }
+
+  /* ---- 花瓣几何体重建 (保留 instanced 属性) ---- */
+  function rebuildPetalGeo() {
+    const newGeo = createPetalGeometry(P.size, P.dx, P.dy);
+    newGeo.setAttribute('aCurl', curlAttr);
+    newGeo.setAttribute('aTwist', twistAttr);
+    mesh.geometry.dispose();
+    mesh.geometry = newGeo;
+    petalGeo = newGeo;
+    // 同步掉落花瓣几何体
+    if (typeof fallGeo !== 'undefined') {
+      fallGeo.dispose();
+      fallGeo = newGeo.clone();
+      fallGeo.setAttribute('aCurl', fallCurlAttr2);
+      fallGeo.setAttribute('aTwist', fallTwistAttr2);
+      fallMesh.geometry = fallGeo;
+    }
+  }
+
+  /* ===========================================================
+     UI 绑定
+  =========================================================== */
+  function bind(id, key, opts = {}) {
+    const el = document.getElementById(id);
+    const valEl = document.getElementById(id + 'V');
+    const isColor = el.type === 'color';
+
+    el.addEventListener('input', () => {
+      P[key] = isColor ? el.value : parseFloat(el.value);
+      if (valEl) valEl.textContent = isColor ? el.value : parseFloat(el.value).toFixed(opts.dec ?? 0);
+      if (opts.onUpdate) opts.onUpdate();
+    });
+  }
+
+  const onCountChange = () => { mesh.count = P.rings * P.petals; updateColors(); };
+  const onGeoChange = () => {
+    rebuildPetalGeo();
+    shaderUniforms.uPetalSize.value = P.size;
+    shaderUniforms.uPetalDx.value = P.dx;
+  };
+  const onColorChange = () => { updateColors(); };
+  const onMatChange = () => {
+    petalMat.metalness = P.metalness;
+    petalMat.roughness = P.roughness;
+    petalMat.transmission = P.transmission;
+    petalMat.sheen = P.sheen;
+    petalMat.sheenColor.set(P.sheenColor);
+    petalMat.sheenRoughness = P.sheenRoughness;
+    petalMat.clearcoat = P.clearcoat;
+    petalMat.needsUpdate = true;
+  };
+  const onLightChange = () => {
+    spot1.color.set(P.lightColor1);
+    spot2.color.set(P.lightColor2);
+    syncHelpers();
+  };
+
+  bind('rings',       'rings',       { onUpdate: onCountChange });
+  bind('petals',      'petals',      { onUpdate: onCountChange });
+  bind('color1',      'color1',      { onUpdate: onColorChange });
+  bind('color2',      'color2',      { onUpdate: onColorChange });
+  bind('lightColor1', 'lightColor1', { onUpdate: onLightChange });
+  bind('lightColor2', 'lightColor2', { onUpdate: onLightChange });
+  bind('pSize',       'size',        { dec: 2, onUpdate: onGeoChange });
+  bind('pDx',         'dx',          { dec: 2, onUpdate: onGeoChange });
+  bind('pDy',         'dy',          { dec: 2, onUpdate: onGeoChange });
+  bind('maxRadius',   'maxRadius',   { dec: 1 });
+  bind('maxScale',    'maxScale',    { dec: 1 });
+  bind('startRx',     'startRx',     { dec: 2 });
+  bind('zOffsetCoef', 'zOffsetCoef', { dec: 2 });
+  bind('metalness',      'metalness',      { dec: 2, onUpdate: onMatChange });
+  bind('roughness',      'roughness',      { dec: 2, onUpdate: onMatChange });
+  bind('transmission',   'transmission',   { dec: 2, onUpdate: onMatChange });
+  bind('sheen',          'sheen',          { dec: 2, onUpdate: onMatChange });
+  bind('sheenColor',     'sheenColor',     { onUpdate: onMatChange });
+  bind('sheenRoughness', 'sheenRoughness', { dec: 2, onUpdate: onMatChange });
+  bind('clearcoat',      'clearcoat',      { dec: 2, onUpdate: onMatChange });
+  bind('baseCurl',       'baseCurl',       { dec: 1 });
+  bind('curlVar',        'curlVar',        { dec: 2 });
+  bind('baseTwist',      'baseTwist',      { dec: 1 });
+  bind('twistVar',       'twistVar',       { dec: 2 });
+
+  // ★ 防穿模绑定
+  bind('layerGap',       'layerGap',       { dec: 3 });
+  bind('scaleDecay',     'scaleDecay',     { dec: 2 });
+  bind('innerShrink',    'innerShrink',    { dec: 2 });
+
+  // ★ 花瓣高级形态绑定 (Shader Uniforms)
+  const onShaderChange = () => {
+    shaderUniforms.uBowlDepth.value  = P.bowlDepth;
+    shaderUniforms.uVeinStr.value    = P.veinStr;
+    shaderUniforms.uVeinWidth.value  = P.veinWidth;
+    shaderUniforms.uVeinColor.value  = hexToVec3(P.veinColor);
+    shaderUniforms.uMidribStr.value  = P.midribStr;
+    shaderUniforms.uLateralStr.value = P.lateralStr;
+    shaderUniforms.uSecStr.value     = P.secStr;
+    shaderUniforms.uMicroStr.value   = P.microStr;
+    shaderUniforms.uTaperPow.value   = P.taperPow;
+    shaderUniforms.uEdgeLight.value  = P.edgeLight;
+    shaderUniforms.uHueShift.value   = P.hueShift;
+  };
+  bind('bowlDepth',   'bowlDepth',   { dec: 2, onUpdate: onShaderChange });
+  bind('veinStr',     'veinStr',     { dec: 2, onUpdate: onShaderChange });
+  bind('veinWidth',   'veinWidth',   { dec: 0, onUpdate: onShaderChange });
+  bind('midribStr',   'midribStr',   { dec: 2, onUpdate: onShaderChange });
+  bind('lateralStr',  'lateralStr',  { dec: 2, onUpdate: onShaderChange });
+  bind('secStr',      'secStr',      { dec: 2, onUpdate: onShaderChange });
+  bind('microStr',    'microStr',    { dec: 2, onUpdate: onShaderChange });
+  bind('taperPow',    'taperPow',    { dec: 2, onUpdate: onShaderChange });
+  bind('edgeLight',   'edgeLight',   { dec: 2, onUpdate: onShaderChange });
+  bind('hueShift',    'hueShift',    { dec: 3, onUpdate: onShaderChange });
+
+  // 脉络颜色绑定
+  document.getElementById('veinColor').addEventListener('input', e => {
+    P.veinColor = e.target.value;
+    document.getElementById('veinColorV').textContent = e.target.value;
+    onShaderChange();
+  });
+
+  // ★ 花型预设系统
+  const SHAPE_PRESETS = {
+    rose: {
+      size: 0.75, dx: 0.40, dy: 0.80, petals: 7, rings: 14,
+      startRx: 2.42, zOffsetCoef: 0.50, maxScale: 2.2, maxRadius: 0.1,
+      bowlDepth: 0.35, taperPow: 0.75,
+      veinStr: 0.6, veinWidth: 3000, veinColor: '#2d5a1e', edgeLight: 0.2, hueShift: 0,
+      baseCurl: 1.5, curlVar: 0.15, baseTwist: 0.4, twistVar: 0,
+      color1: '#ffffff', color2: '#ff0000',
+      tex: 'none', texGrad1: '#ffffff', texGrad2: '#ff4488',
+    },
+    lotus: {
+      size: 1.2, dx: 0.55, dy: 1.0, petals: 6, rings: 18,
+      startRx: 1.80, zOffsetCoef: 0.30, maxScale: 2.5, maxRadius: 0.15,
+      bowlDepth: 1.2, taperPow: 0.75,
+      veinStr: 0.4, veinWidth: 2500, veinColor: '#3a6b2a', edgeLight: 0.4, hueShift: 0,
+      baseCurl: 0.8, curlVar: 0.1, baseTwist: 0.1, twistVar: 0,
+      color1: '#fff0f5', color2: '#ff69b4',
+      tex: 'gradient', texGrad1: '#fff0f5', texGrad2: '#ff69b4',
+    },
+    chrysanthemum: {
+      size: 1.6, dx: 0.15, dy: 0.5, petals: 12, rings: 20,
+      startRx: 2.80, zOffsetCoef: 0.15, maxScale: 1.8, maxRadius: 0.05,
+      bowlDepth: 0.15, taperPow: 0.25,
+      veinStr: 0.5, veinWidth: 4000, veinColor: '#4a7a20', edgeLight: 0.1, hueShift: 0.12,
+      baseCurl: 2.0, curlVar: 0.3, baseTwist: 0.2, twistVar: 0.1,
+      color1: '#fffff0', color2: '#ffd700',
+      tex: 'vein', texGrad1: '#fffff0', texGrad2: '#ffd700',
+    },
+    cherry: {
+      size: 0.65, dx: 0.50, dy: 0.70, petals: 5, rings: 12,
+      startRx: 2.20, zOffsetCoef: 0.60, maxScale: 2.0, maxRadius: 0.12,
+      bowlDepth: 0.50, taperPow: 0.90,
+      veinStr: 0.3, veinWidth: 3500, veinColor: '#5a3040', edgeLight: 0.35, hueShift: 0,
+      baseCurl: 1.0, curlVar: 0.2, baseTwist: 0.15, twistVar: 0.05,
+      color1: '#fff5f5', color2: '#ffb7c5',
+      tex: 'gradient', texGrad1: '#fff5f5', texGrad2: '#ffb7c5',
+    },
+    tulip: {
+      size: 1.0, dx: 0.45, dy: 0.90, petals: 6, rings: 10,
+      startRx: 1.40, zOffsetCoef: 0.20, maxScale: 2.8, maxRadius: 0.05,
+      bowlDepth: 1.8, taperPow: 0.60,
+      veinStr: 0.3, veinWidth: 2000, veinColor: '#4a2020', edgeLight: 0.15, hueShift: 0,
+      baseCurl: 0.6, curlVar: 0.05, baseTwist: 0.05, twistVar: 0,
+      color1: '#fff0f0', color2: '#ff2200',
+      tex: 'gradient', texGrad1: '#fff0f0', texGrad2: '#ff2200',
+    },
+    lily: {
+      size: 1.4, dx: 0.35, dy: 1.1, petals: 6, rings: 14,
+      startRx: 2.60, zOffsetCoef: 0.40, maxScale: 2.4, maxRadius: 0.2,
+      bowlDepth: 0.30, taperPow: 0.50,
+      veinStr: 0.7, veinWidth: 2500, veinColor: '#2a5a30', edgeLight: 0.5, hueShift: 0,
+      baseCurl: 1.2, curlVar: 0.2, baseTwist: 0.3, twistVar: 0.1,
+      color1: '#ffffff', color2: '#ff8844',
+      tex: 'vein', texGrad1: '#ffffff', texGrad2: '#ff8844',
+    },
+  };
+
+  // 同步 UI 滑块和显示值
+  function syncSlider(id, val, dec) {
+    const el = document.getElementById(id);
+    const valEl = document.getElementById(id + 'V');
+    if (el) { el.value = val; }
+    if (valEl) { valEl.textContent = (typeof val === 'string') ? val : Number(val).toFixed(dec ?? 2); }
+  }
+
+  function applyShapePreset(name) {
+    const preset = SHAPE_PRESETS[name];
+    if (!preset) return;
+
+    // 更新 P 对象
+    Object.assign(P, preset);
+
+    // 同步所有 UI 滑块
+    syncSlider('pSize', P.size, 2);
+    syncSlider('pDx', P.dx, 2);
+    syncSlider('pDy', P.dy, 2);
+    syncSlider('petals', P.petals, 0);
+    syncSlider('rings', P.rings, 0);
+    syncSlider('startRx', P.startRx, 2);
+    syncSlider('zOffsetCoef', P.zOffsetCoef, 2);
+    syncSlider('maxScale', P.maxScale, 1);
+    syncSlider('maxRadius', P.maxRadius, 1);
+    syncSlider('bowlDepth', P.bowlDepth, 2);
+    syncSlider('taperPow', P.taperPow, 2);
+    syncSlider('veinStr', P.veinStr, 2);
+    syncSlider('veinWidth', P.veinWidth, 0);
+    syncSlider('edgeLight', P.edgeLight, 2);
+    syncSlider('hueShift', P.hueShift, 3);
+
+    // 脉络颜色
+    if (P.veinColor) {
+      document.getElementById('veinColor').value = P.veinColor;
+      document.getElementById('veinColorV').textContent = P.veinColor;
+    }
+    syncSlider('baseCurl', P.baseCurl, 1);
+    syncSlider('curlVar', P.curlVar, 2);
+    syncSlider('baseTwist', P.baseTwist, 1);
+    syncSlider('twistVar', P.twistVar, 2);
+
+    // 颜色
+    document.getElementById('color1').value = P.color1;
+    document.getElementById('color2').value = P.color2;
+    document.getElementById('color1V').textContent = P.color1;
+    document.getElementById('color2V').textContent = P.color2;
+
+    // 贴图渐变色
+    if (preset.texGrad1) {
+      document.getElementById('texGrad1').value = preset.texGrad1;
+      document.getElementById('texGrad1V').textContent = preset.texGrad1;
+    }
+    if (preset.texGrad2) {
+      document.getElementById('texGrad2').value = preset.texGrad2;
+      document.getElementById('texGrad2V').textContent = preset.texGrad2;
+    }
+
+    // 贴图类型切换
+    if (preset.tex) {
+      currentTexType = preset.tex;
+      // 同步贴图按钮 active 状态
+      document.querySelectorAll('#texPresets .btn-rand').forEach(b => {
+        b.classList.toggle('active', b.dataset.tex === preset.tex);
+      });
+      if (currentTexType === 'none') { applyTexture(null); }
+      else { updateProceduralTex(); }
+    }
+
+    // 触发全量更新
+    mesh.count = P.rings * P.petals;
+    rebuildPetalGeo();
+    shaderUniforms.uPetalSize.value = P.size;
+    shaderUniforms.uPetalDx.value = P.dx;
+    updateColors();
+    onShaderChange();
+  }
+
+  document.querySelectorAll('#shapePresets .shape-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#shapePresets .shape-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      applyShapePreset(btn.dataset.shape);
+    });
+  });
+
+  /* ---- 灯光控制绑定 ---- */
+  function bindLight(id, callback) {
+    const el = document.getElementById(id);
+    const valEl = document.getElementById(id + 'V');
+    el.addEventListener('input', () => {
+      const v = parseFloat(el.value);
+      if (valEl) valEl.textContent = v.toFixed(el.step.includes('.') ? (el.step.split('.')[1]||'').length || 1 : 0);
+      callback(v);
+    });
+  }
+  bindLight('ambientInt', v => { ambient.intensity = v; });
+  bindLight('bloomStr',   v => { bloomPass.strength = v; });
+  bindLight('exposure',   v => { renderer.toneMappingExposure = v; });
+
+  // ★ 聚光灯 1 完整控制
+  bindLight('spot1Int',      v => { spot1.intensity = v; syncHelpers(); });
+  bindLight('spot1X',        v => { spot1.position.x = v; syncHelpers(); });
+  bindLight('spot1Y',        v => { spot1.position.y = v; syncHelpers(); });
+  bindLight('spot1Z',        v => { spot1.position.z = v; syncHelpers(); });
+  bindLight('spot1Angle',    v => { spot1.angle = v * Math.PI / 180; syncHelpers(); });
+  bindLight('spot1Penumbra', v => { spot1.penumbra = v; syncHelpers(); });
+  bindLight('spot1Distance', v => { spot1.distance = v; syncHelpers(); });
+
+  // ★ 聚光灯 2 完整控制
+  bindLight('spot2Int',      v => { spot2.intensity = v; syncHelpers(); });
+  bindLight('spot2X',        v => { spot2.position.x = v; syncHelpers(); });
+  bindLight('spot2Y',        v => { spot2.position.y = v; syncHelpers(); });
+  bindLight('spot2Z',        v => { spot2.position.z = v; syncHelpers(); });
+  bindLight('spot2Angle',    v => { spot2.angle = v * Math.PI / 180; syncHelpers(); });
+  bindLight('spot2Penumbra', v => { spot2.penumbra = v; syncHelpers(); });
+  bindLight('spot2Distance', v => { spot2.distance = v; syncHelpers(); });
+
+  // ★ 显示/隐藏灯光辅助
+  document.getElementById('showHelpers').addEventListener('change', e => {
+    showHelpers = e.target.checked;
+    updateHelperVisibility();
+  });
+
+  /* ---- Random Colors ---- */
+  document.getElementById('randColors').addEventListener('click', () => {
+    P.color1 = randomHex(); P.color2 = randomHex();
+    P.lightColor1 = randomHex(); P.lightColor2 = randomHex();
+    document.getElementById('color1').value = P.color1;
+    document.getElementById('color2').value = P.color2;
+    document.getElementById('lightColor1').value = P.lightColor1;
+    document.getElementById('lightColor2').value = P.lightColor2;
+    // 同步 hex 显示
+    document.getElementById('color1V').textContent = P.color1;
+    document.getElementById('color2V').textContent = P.color2;
+    document.getElementById('lightColor1V').textContent = P.lightColor1;
+    document.getElementById('lightColor2V').textContent = P.lightColor2;
+    updateColors();
+    spot1.color.set(P.lightColor1);
+    spot2.color.set(P.lightColor2);
+  });
+
+  /* ===========================================================
+     🖼 背景控制
+  =========================================================== */
+  function setBg(hex) {
+    scene.background = new THREE.Color(hex);
+    document.getElementById('bgColor').value = hex;
+    document.getElementById('bgColorV').textContent = hex;
+    document.querySelectorAll('#bgPresets .preset-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.bg === hex);
+    });
+  }
+  document.querySelectorAll('#bgPresets .preset-btn').forEach(btn => {
+    btn.addEventListener('click', () => setBg(btn.dataset.bg));
+  });
+  document.getElementById('bgColor').addEventListener('input', e => {
+    setBg(e.target.value);
+    document.querySelectorAll('#bgPresets .preset-btn').forEach(b => b.classList.remove('active'));
+  });
+
+  /* ===========================================================
+     🎨 程序化贴图生成 & 上传
+  =========================================================== */
+  let currentTexType = 'none';
+
+  function makeGradientTex(c1, c2) {
+    const cv = document.createElement('canvas'); cv.width = 256; cv.height = 512;
+    const ctx = cv.getContext('2d');
+    const g = ctx.createLinearGradient(0, 0, 0, 512);
+    g.addColorStop(0, c1); g.addColorStop(1, c2);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 256, 512);
+    return new THREE.CanvasTexture(cv);
+  }
+
+  function makeVeinTex(c1, c2) {
+    const cv = document.createElement('canvas'); cv.width = 256; cv.height = 512;
+    const ctx = cv.getContext('2d');
+    // 底色渐变
+    const g = ctx.createLinearGradient(0, 0, 0, 512);
+    g.addColorStop(0, c1); g.addColorStop(1, c2);
+    ctx.fillStyle = g; ctx.fillRect(0, 0, 256, 512);
+    // 脉络线
+    ctx.strokeStyle = 'rgba(0,0,0,0.08)'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(128, 0); ctx.lineTo(128, 512); ctx.stroke();
+    for (let i = 1; i <= 12; i++) {
+      const y = i * 40; const spread = 30 + i * 8;
+      ctx.beginPath(); ctx.moveTo(128, y); ctx.quadraticCurveTo(128 + spread, y + 25, 128 + spread * 1.5, y + 10); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(128, y); ctx.quadraticCurveTo(128 - spread, y + 25, 128 - spread * 1.5, y + 10); ctx.stroke();
+    }
+    return new THREE.CanvasTexture(cv);
+  }
+
+  function makeNoiseTex(c1, c2) {
+    const cv = document.createElement('canvas'); cv.width = 256; cv.height = 256;
+    const ctx = cv.getContext('2d');
+    const img = ctx.createImageData(256, 256);
+    const rgb1 = hexToRgb(c1), rgb2 = hexToRgb(c2);
+    for (let i = 0; i < img.data.length; i += 4) {
+      const t = Math.random();
+      const r = rgb1[0] + (rgb2[0] - rgb1[0]) * t;
+      const g = rgb1[1] + (rgb2[1] - rgb1[1]) * t;
+      const b = rgb1[2] + (rgb2[2] - rgb1[2]) * t;
+      img.data[i] = r * 255; img.data[i+1] = g * 255; img.data[i+2] = b * 255; img.data[i+3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+    return new THREE.CanvasTexture(cv);
+  }
+
+  function applyTexture(tex) {
+    if (petalMat.map) { petalMat.map.dispose(); }
+    petalMat.map = tex;
+    petalMat.needsUpdate = true;
+  }
+
+  function updateProceduralTex() {
+    const c1 = document.getElementById('texGrad1').value;
+    const c2 = document.getElementById('texGrad2').value;
+    if (currentTexType === 'gradient') applyTexture(makeGradientTex(c1, c2));
+    else if (currentTexType === 'vein') applyTexture(makeVeinTex(c1, c2));
+    else if (currentTexType === 'noise') applyTexture(makeNoiseTex(c1, c2));
+  }
+
+  document.querySelectorAll('#texPresets .btn-rand').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('#texPresets .btn-rand').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentTexType = btn.dataset.tex;
+      document.getElementById('texFileName').textContent = '未选择';
+      if (currentTexType === 'none') { applyTexture(null); return; }
+      updateProceduralTex();
+    });
+  });
+
+  document.getElementById('texGrad1').addEventListener('input', e => {
+    document.getElementById('texGrad1V').textContent = e.target.value;
+    if (currentTexType !== 'none') updateProceduralTex();
+  });
+  document.getElementById('texGrad2').addEventListener('input', e => {
+    document.getElementById('texGrad2V').textContent = e.target.value;
+    if (currentTexType !== 'none') updateProceduralTex();
+  });
+
+  document.getElementById('texFile').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    document.getElementById('texFileName').textContent = file.name;
+    currentTexType = 'custom';
+    const reader = new FileReader();
+    reader.onload = () => {
+      new THREE.TextureLoader().load(reader.result, tex => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        applyTexture(tex);
+      });
+    };
+    reader.readAsDataURL(file);
+  });
+
+  /* ===========================================================
+     🍂 花瓣掉落系统 (参考 waynezhanghci 的 falling petals)
+  =========================================================== */
+  const FALL_MAX = 60;
+  const fallP = {
+    enabled: false,
+    count: 20,
+    speed: 0.8,
+    spread: 3,
+    spin: 2,
+    sway: 1,
+    scale: 0.7,
+    originX: 0,
+    originY: 0,
+    originZ: 1,
+    drop: 6,
+    // 风力
+    windEnabled: true,
+    windX: 0.5,
+    windY: 0.3,
+    windZ: 0,
+    gustStr: 0.5,
+    gustFreq: 0.8,
+    // 淡入淡出
+    fadeEnabled: true,
+    fadeIn: 0.8,
+    fadeOut: 1.2,
+  };
+
+  // ★ 掉落花瓣直接用主材质 (完整 PBR + 脉络, 无闪烁)
+  // 用独立几何体 clone, 绑定自己的 instanced attributes
+  let fallGeo = petalGeo.clone();
+  // 掉落花瓣需要自己的 aCurl/aTwist (不和主花冲突)
+  const fallCurlArr = new Float32Array(FALL_MAX);
+  const fallTwistArr = new Float32Array(FALL_MAX);
+  const fallCurlAttr2 = new THREE.InstancedBufferAttribute(fallCurlArr, 1).setUsage(THREE.DynamicDrawUsage);
+  const fallTwistAttr2 = new THREE.InstancedBufferAttribute(fallTwistArr, 1).setUsage(THREE.DynamicDrawUsage);
+  fallGeo.setAttribute('aCurl', fallCurlAttr2);
+  fallGeo.setAttribute('aTwist', fallTwistAttr2);
+
+  const fallMesh = new THREE.InstancedMesh(fallGeo, petalMat, FALL_MAX);
+  fallMesh.castShadow = true;
+  fallMesh.count = 0;
+  scene.add(fallMesh);
+
+  const fallDummy = new THREE.Object3D();
+
+  // 每片掉落花瓣的状态 (初始错开出生时间, 让花瓣逐个出现)
+  const fallState = [];
+  for (let i = 0; i < FALL_MAX; i++) {
+    fallState.push(resetFallingPetal({}, i * 0.15));  // 每片间隔 0.15s 出生
+  }
+
+  function resetFallingPetal(s, staggerDelay) {
+    // ★ 所有花瓣从同一个出生点 (控制器中心) 开始
+    s.x = fallP.originX;
+    s.y = fallP.originY;
+    s.z = fallP.originZ;
+    // 初速: 水平随机散开 + 向下
+    const angle = Math.random() * Math.PI * 2;
+    const hSpd = 0.1 + Math.random() * 0.3;
+    s.vx = Math.cos(angle) * hSpd;
+    s.vy = Math.sin(angle) * hSpd;
+    s.vz = -(0.2 + Math.random() * 0.4);
+    // 初始旋转 — 模拟最外层花瓣脱落时的朝向
+    s.rx = P.startRx * 0.5 + Math.random() * 0.5;
+    s.ry = Math.random() * Math.PI * 2;
+    s.rz = angle;  // 朝向散开方向
+    // 旋转速度 — 缓慢翻转 (匹配展开动画速度)
+    s.sx = (Math.random() - 0.5) * 1.2;
+    s.sy = (Math.random() - 0.5) * 1.2;
+    s.sz = (Math.random() - 0.5) * 0.6;
+    s.swayPhase = Math.random() * Math.PI * 2;
+    s.swayFreq = 0.3 + Math.random() * 0.8;
+    // ★ 大小匹配最外层花瓣 (P.maxScale × tcoef≈1)
+    s.sc = P.maxScale * fallP.scale * (0.8 + Math.random() * 0.4);
+    s.age = -(staggerDelay || 0);  // 负数 = 等待出生 (错开时间)
+    s.lifespan = 4 + Math.random() * 5;
+    s.curl = P.baseCurl * (0.3 + Math.random() * 0.4);
+    s.twist = P.baseTwist * (Math.random() - 0.5) * 0.5;
+    return s;
+  }
+
+  function updateFallingPetals(dt) {
+    if (!fallP.enabled) { fallMesh.count = 0; return; }
+    const count = Math.min(fallP.count, FALL_MAX);
+    fallMesh.count = count;
+    const spd = fallP.speed;
+    const spin = fallP.spin;
+    const sway = fallP.sway;
+    const bottomZ = fallP.originZ - fallP.drop;
+    const now = Date.now() * 0.001;
+
+    // 阵风
+    const gustMul = fallP.windEnabled
+      ? 1 + Math.sin(now * fallP.gustFreq * Math.PI * 2) * fallP.gustStr
+      : 0;
+    const wx = fallP.windEnabled ? fallP.windX * gustMul : 0;
+    const wy = fallP.windEnabled ? fallP.windY * gustMul : 0;
+    const wz = fallP.windEnabled ? fallP.windZ * gustMul : 0;
+
+    for (let i = 0; i < count; i++) {
+      const s = fallState[i];
+      s.age += dt;
+
+      // 还在等待出生 → 隐藏 (scale=0 在出生点)
+      if (s.age < 0) {
+        fallDummy.position.set(fallP.originX, fallP.originY, fallP.originZ);
+        fallDummy.scale.setScalar(0);
+        fallDummy.updateMatrix();
+        fallMesh.setMatrixAt(i, fallDummy.matrix);
+        fallCurlArr[i] = s.curl;
+        fallTwistArr[i] = s.twist;
+        continue;
+      }
+
+      // 物理: 基础运动 + 摇摆 + 风力
+      s.x += (s.vx * spd + Math.sin(s.swayPhase + now * s.swayFreq) * sway * 0.3 + wx) * dt;
+      s.y += (s.vy * spd + Math.cos(s.swayPhase + now * 0.8 * s.swayFreq) * sway * 0.2 + wy) * dt;
+      s.z += (s.vz * spd + wz) * dt;
+      // 不允许飘到出生点上方
+      if (s.z > fallP.originZ) s.z = fallP.originZ;
+
+      // 风力影响旋转
+      if (fallP.windEnabled) {
+        s.rx += wx * 0.15 * dt;
+        s.ry += wy * 0.15 * dt;
+      }
+      s.rx += s.sx * dt * spin;
+      s.ry += s.sy * dt * spin;
+      s.rz += s.sz * dt * spin * 0.3;
+
+      // ★ 缩放渐变 (smoothstep 淡入/淡出, 代替 alpha 避免闪烁)
+      let scaleMul = 1;
+      if (fallP.fadeEnabled) {
+        const fadeIn = Math.min(s.age / fallP.fadeIn, 1);
+        const fadeOut = Math.max((s.lifespan - s.age) / fallP.fadeOut, 0);
+        scaleMul = Math.min(fadeIn, fadeOut);
+        scaleMul = scaleMul * scaleMul * (3 - 2 * scaleMul); // smoothstep
+      }
+
+      fallCurlArr[i] = s.curl;
+      fallTwistArr[i] = s.twist;
+
+      // 寿命结束 或 触底 → 重置 (错开出生)
+      if (s.z < bottomZ || s.age >= s.lifespan) {
+        resetFallingPetal(s, Math.random() * 2);  // 随机 0~2s 延迟再出生
+      }
+
+      fallDummy.position.set(s.x, s.y, s.z);
+      fallDummy.rotation.set(s.rx, s.ry, s.rz);
+      fallDummy.scale.setScalar(s.sc * scaleMul);
+      fallDummy.updateMatrix();
+      fallMesh.setMatrixAt(i, fallDummy.matrix);
+
+      // 颜色: 模拟最外层花瓣 (偏向 color2 即深色端)
+      const t = 0.6 + (i / Math.max(count, 1)) * 0.4;
+      const rgb = colorScale(P.color1, P.color2, t);
+      tmpColor.setRGB(rgb[0], rgb[1], rgb[2]);
+      fallMesh.setColorAt(i, tmpColor);
+    }
+    fallMesh.instanceMatrix.needsUpdate = true;
+    fallCurlAttr2.needsUpdate = true;
+    fallTwistAttr2.needsUpdate = true;
+    if (fallMesh.instanceColor) fallMesh.instanceColor.needsUpdate = true;
+  }
+
+  // 掉落控制绑定
+  document.getElementById('fallEnabled').addEventListener('change', e => {
+    fallP.enabled = e.target.checked;
+  });
+  function bindFall(id, key, dec) {
+    const el = document.getElementById(id);
+    const valEl = document.getElementById(id + 'V');
+    el.addEventListener('input', () => {
+      fallP[key] = parseFloat(el.value);
+      if (valEl) valEl.textContent = Number(el.value).toFixed(dec);
+    });
+  }
+  bindFall('fallCount',   'count',   0);
+  bindFall('fallSpeed',   'speed',   1);
+  bindFall('fallSpread',  'spread',  1);
+  bindFall('fallSpin',    'spin',    1);
+  bindFall('fallSway',    'sway',    1);
+  bindFall('fallScale',   'scale',   1);
+
+  // 风力控制
+  document.getElementById('windEnabled').addEventListener('change', e => { fallP.windEnabled = e.target.checked; });
+  bindFall('windX',     'windX',    1);
+  bindFall('windY',     'windY',    1);
+  bindFall('windZ',     'windZ',    1);
+  bindFall('gustStr',   'gustStr',  1);
+  bindFall('gustFreq',  'gustFreq', 1);
+
+  // 淡入淡出控制
+  document.getElementById('fadeEnabled').addEventListener('change', e => { fallP.fadeEnabled = e.target.checked; });
+  bindFall('fadeIn',    'fadeIn',   1);
+  bindFall('fadeOut',   'fadeOut',  1);
+
+  bindFall('fallOriginX', 'originX', 1);
+  bindFall('fallOriginY', 'originY', 1);
+  bindFall('fallOriginZ', 'originZ', 1);
+  bindFall('fallDrop',    'drop',    1);
+
+  /* ---- 🎯 TransformControls 拖拽定位 ---- */
+  // 控制点: 小球 + XYZ gizmo
+  const markerGeo = new THREE.SphereGeometry(0.12, 16, 16);
+  const markerMat = new THREE.MeshBasicMaterial({
+    color: 0xff6600, transparent: true, opacity: 0.8, depthTest: false
+  });
+  const marker = new THREE.Mesh(markerGeo, markerMat);
+  marker.position.set(fallP.originX, fallP.originY, fallP.originZ);
+  marker.visible = false;
+  marker.renderOrder = 999;
+  scene.add(marker);
+
+  // TransformControls — XYZ 轴线拖拽
+  const gizmo = new TransformControls(camera, canvas);
+  gizmo.setMode('translate');
+  gizmo.setSize(0.6);  // 轴线大小适中
+  gizmo.attach(marker);
+  gizmo.visible = false;
+  gizmo.enabled = false;
+  scene.add(gizmo);
+
+  let dragMode = false;
+
+  function syncFallSliders() {
+    const x = marker.position.x, y = marker.position.y, z = marker.position.z;
+    fallP.originX = Math.round(x * 10) / 10;
+    fallP.originY = Math.round(y * 10) / 10;
+    fallP.originZ = Math.round(z * 10) / 10;
+    document.getElementById('fallOriginX').value = fallP.originX;
+    document.getElementById('fallOriginY').value = fallP.originY;
+    document.getElementById('fallOriginZ').value = fallP.originZ;
+    document.getElementById('fallOriginXV').textContent = fallP.originX.toFixed(1);
+    document.getElementById('fallOriginYV').textContent = fallP.originY.toFixed(1);
+    document.getElementById('fallOriginZV').textContent = fallP.originZ.toFixed(1);
+  }
+
+  // 拖拽时禁用 OrbitControls, 实时同步参数
+  let gizmoDragging = false;
+  gizmo.addEventListener('dragging-changed', (e) => {
+    controls.enabled = !e.value;
+    gizmoDragging = e.value;
+  });
+  gizmo.addEventListener('change', () => {
+    if (dragMode) syncFallSliders();
+  });
+
+  // 滑块改变时也同步 marker 位置
+  ['fallOriginX', 'fallOriginY', 'fallOriginZ'].forEach(id => {
+    document.getElementById(id).addEventListener('input', () => {
+      marker.position.set(fallP.originX, fallP.originY, fallP.originZ);
+    });
+  });
+
+  // 按钮切换
+  const fallDragBtn = document.getElementById('fallDragBtn');
+  fallDragBtn.addEventListener('click', () => {
+    dragMode = !dragMode;
+    fallDragBtn.classList.toggle('active', dragMode);
+    fallDragBtn.textContent = dragMode ? '✅ 拖拽中 (点击关闭)' : '🎯 XYZ 轴拖拽定位';
+    marker.visible = dragMode;
+    gizmo.visible = dragMode;
+    gizmo.enabled = dragMode;
+    if (dragMode) {
+      marker.position.set(fallP.originX, fallP.originY, fallP.originZ);
+    }
+  });
+
+  // 掉落花瓣也用同一个几何体, 重建时同步
+  const origRebuild = rebuildPetalGeo;
+  // (rebuildPetalGeo 已经定义, 这里 monkey-patch)
+  const _origRebuildFn = rebuildPetalGeo;
+
+  /* ===========================================================
+     渲染循环
+  =========================================================== */
+  let lastTime = Date.now();
+  function animate() {
+    requestAnimationFrame(animate);
+    const now = Date.now();
+    const dt = Math.min((now - lastTime) / 1000, 0.1); // 秒, 上限 100ms
+    lastTime = now;
+
+    controls.update();
+    updateMatrices();
+    updateFallingPetals(dt);
+    // 灯光 helper 跟随
+    if (showHelpers || lightPanelOpen) { helper1.update(); helper2.update(); }
+    composer.render();
+  }
+  animate();
+
+  </script>
+</body>
+</html>
