@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Procedural 3D Ecosystem · 程序化数字资产库</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <script type="module" crossorigin src="/3DProcedural_Ecosystem/assets/index-Csoyj-5n.js"></script>
+  <link rel="stylesheet" crossorigin href="/3DProcedural_Ecosystem/assets/index-CIfLZxs9.css">
+</head>
+<body>
+
+<!-- ====== Canvas ====== -->
+<div id="canvas-container"></div>
+
+<!-- ====== Topbar ====== -->
+<header id="topbar">
+  <div class="logo">
+    <div class="logo-icon">◈</div>
+    Procedural <span>Ecosystem</span>
+  </div>
+  <div id="topbar-stats">
+    <div class="stat-item"><div class="stat-dot"></div><span id="stat-fps">60 FPS</span></div>
+    <div class="stat-item"><span id="stat-seed">Seed: 42</span></div>
+    <div class="stat-item"><span id="stat-geo">Geo: 0</span></div>
+    <div class="stat-item"><span id="stat-verts">Verts: 0</span></div>
+  </div>
+</header>
+
+<!-- ====== Sidebar ====== -->
+<nav id="sidebar">
+
+  <!-- 🌿 Flora 植物生态系 -->
+  <div class="namespace-group anim-in">
+    <div class="ns-header">
+      <span class="ns-icon">🌿</span> Flora · 植物生态系 <span class="ns-tag">3</span>
+    </div>
+    <button class="entity-btn active" data-mode="trois-flower">
+      <span class="btn-emoji">🌹</span>
+      <span class="btn-label">TroisFlower<small>LD 原版花</small></span>
+      <span class="btn-badge">PBR</span>
+    </button>
+    <button class="entity-btn" data-mode="dahlia">
+      <span class="btn-emoji">🏵️</span>
+      <span class="btn-label">Dahlia<small>大丽花</small></span>
+      <span class="btn-badge">SSS</span>
+    </button>
+    <button class="entity-btn" data-mode="tulip">
+      <span class="btn-emoji">🌷</span>
+      <span class="btn-label">Tulip<small>郁金香</small></span>
+      <span class="btn-badge">Growth</span>
+    </button>
+  </div>
+
+  <!-- 🦋 Fauna 仿生动力系 -->
+  <div class="namespace-group anim-in" style="animation-delay:0.05s">
+    <div class="ns-header">
+      <span class="ns-icon">🦋</span> Fauna · 仿生动力系 <span class="ns-tag">3</span>
+    </div>
+    <button class="entity-btn" data-mode="butterfly">
+      <span class="btn-emoji">🦋</span>
+      <span class="btn-label">BionicButterfly<small>仿生蝶</small></span>
+      <span class="btn-badge">Iridescence</span>
+    </button>
+    <button class="entity-btn" data-mode="flock">
+      <span class="btn-emoji">🐦</span>
+      <span class="btn-label">Boids Swarm<small>蝴蝶群</small></span>
+      <span class="btn-badge">Boids</span>
+    </button>
+    <button class="entity-btn" data-mode="vanta-birds">
+      <span class="btn-emoji">🕊️</span>
+      <span class="btn-label">Birds<small>飞鸟集群</small></span>
+      <span class="btn-badge">Flock</span>
+    </button>
+  </div>
+
+  <!-- 🔮 Abstract 高阶数学场 -->
+  <div class="namespace-group anim-in" style="animation-delay:0.1s">
+    <div class="ns-header">
+      <span class="ns-icon">🔮</span> Abstract · 高阶数学场 <span class="ns-tag">9</span>
+    </div>
+    <button class="entity-btn" data-mode="mandelbulb">
+      <span class="btn-emoji">🌀</span>
+      <span class="btn-label">Mandelbulb<small>分形球</small></span>
+      <span class="btn-badge">SDF</span>
+    </button>
+    <button class="entity-btn" data-mode="vanta-halo">
+      <span class="btn-emoji">🔆</span>
+      <span class="btn-label">Halo<small>光环</small></span>
+      <span class="btn-badge">Perlin</span>
+    </button>
+    <button class="entity-btn" data-mode="vanta-cells">
+      <span class="btn-emoji">🧬</span>
+      <span class="btn-label">Cells<small>沃罗诺伊细胞</small></span>
+      <span class="btn-badge">Worley</span>
+    </button>
+    <button class="entity-btn" data-mode="vanta-ripple">
+      <span class="btn-emoji">💫</span>
+      <span class="btn-label">Ripple<small>涟漪</small></span>
+      <span class="btn-badge">Sine</span>
+    </button>
+    <button class="entity-btn" data-mode="vanta-net">
+      <span class="btn-emoji">🕸️</span>
+      <span class="btn-label">Net<small>粒子网络</small></span>
+      <span class="btn-badge">Lines</span>
+    </button>
+    <button class="entity-btn" data-mode="vanta-dots">
+      <span class="btn-emoji">✨</span>
+      <span class="btn-label">Dots<small>星点场</small></span>
+      <span class="btn-badge">Points</span>
+    </button>
+    <button class="entity-btn" data-mode="vanta-rings">
+      <span class="btn-emoji">💍</span>
+      <span class="btn-label">Rings<small>环形阵列</small></span>
+      <span class="btn-badge">Extrude</span>
+    </button>
+    <button class="entity-btn" data-mode="vanta-globe">
+      <span class="btn-emoji">🌍</span>
+      <span class="btn-label">Globe<small>线框地球</small></span>
+      <span class="btn-badge">Wire</span>
+    </button>
+    <button class="entity-btn" data-mode="vanta-topology">
+      <span class="btn-emoji">🌊</span>
+      <span class="btn-label">Topology<small>流场拓扑</small></span>
+      <span class="btn-badge">Flow</span>
+    </button>
+  </div>
+
+  <!-- 🌌 Atmospheric 环境体积系 -->
+  <div class="namespace-group anim-in" style="animation-delay:0.15s">
+    <div class="ns-header">
+      <span class="ns-icon">🌌</span> Atmospheric · 环境体积系 <span class="ns-tag">6</span>
+    </div>
+    <button class="entity-btn" data-mode="aurora">
+      <span class="btn-emoji">🌈</span>
+      <span class="btn-label">Aurora Borealis<small>极光</small></span>
+      <span class="btn-badge">Volume</span>
+    </button>
+    <button class="entity-btn" data-mode="vanta-fog">
+      <span class="btn-emoji">🌫️</span>
+      <span class="btn-label">Fog<small>FBM 迷雾</small></span>
+      <span class="btn-badge">FBM</span>
+    </button>
+    <button class="entity-btn" data-mode="vanta-clouds">
+      <span class="btn-emoji">☁️</span>
+      <span class="btn-label">Clouds<small>体积云</small></span>
+      <span class="btn-badge">Ray</span>
+    </button>
+    <button class="entity-btn" data-mode="vanta-clouds2">
+      <span class="btn-emoji">⛅</span>
+      <span class="btn-label">Clouds2<small>程序云</small></span>
+      <span class="btn-badge">Noise</span>
+    </button>
+    <button class="entity-btn" data-mode="vanta-waves">
+      <span class="btn-emoji">🌊</span>
+      <span class="btn-label">Waves<small>海浪</small></span>
+      <span class="btn-badge">Mesh</span>
+    </button>
+    <button class="entity-btn" data-mode="vanta-trunk">
+      <span class="btn-emoji">🪵</span>
+      <span class="btn-label">Trunk<small>年轮</small></span>
+      <span class="btn-badge">Polar</span>
+    </button>
+  </div>
+
+</nav>
+
+<!-- ====== 参数面板 ====== -->
+<aside id="params-panel">
+  <div id="params-content"></div>
+</aside>
+
+<!-- ====== 3D 控制面板 ====== -->
+<!-- >>> 3D控制器面板开始 - 删除此区块不影响3D主体 <<< -->
+<button class="tc-toggle-btn" id="tcToggleBtn" title="3D 控制面板 (~)">🎮</button>
+<div class="tc-panel" id="tcPanel">
+  <div class="tc-header" id="tcHeader">
+    <span class="tc-header-title">🎮 3D Controller</span>
+    <div class="tc-header-actions">
+      <button class="tc-header-btn" id="tcMinBtn" title="收起">−</button>
+      <button class="tc-header-btn" id="tcExportBtn" title="导出参数 JSON">📋</button>
+    </div>
+  </div>
+  <div class="tc-body" id="tcBody"></div>
+  <div class="tc-footer">
+    <button class="tc-footer-btn" id="tcCopyBtn">📋 复制</button>
+    <button class="tc-footer-btn" id="tcResetBtn">↩ 重置</button>
+    <button class="tc-footer-btn" id="tcSaveBtn">💾 保存</button>
+  </div>
+</div>
+<!-- >>> 3D控制器面板结束 <<< -->
+
+<!-- ====== 固定视角 Toast ====== -->
+<div class="pin-cam-toast" id="pin-toast">📌 已将当前视角固定为展示视角</div>
+
+<!-- ====== 实体信息覆盖 ====== -->
+<div id="entity-overlay">
+  <div class="overlay-title" id="overlay-title">BionicFlower</div>
+  <div class="overlay-subtitle" id="overlay-desc">Fibonacci Phyllotaxis + Bézier 曲面花瓣</div>
+  <div class="overlay-tags" id="overlay-tags"></div>
+</div>
+
+<!-- ====== 底部栏 ====== -->
+<footer id="bottombar">
+  <span>🖱️ Drag · 拖拽旋转</span>
+  <div class="bottom-sep"></div>
+  <span>🔍 Scroll · 缩放</span>
+  <div class="bottom-sep"></div>
+  <span><kbd>R</kbd> 随机种子</span>
+  <div class="bottom-sep"></div>
+  <span><kbd>V</kbd> 切换视角</span>
+  <div class="bottom-sep"></div>
+  <span><kbd>P</kbd> 固定视角</span>
+  <div class="bottom-sep"></div>
+  <span><kbd>`</kbd> 控制面板</span>
+</footer>
+
+</body>
+</html>
