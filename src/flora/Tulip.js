@@ -159,15 +159,18 @@ export class Tulip {
     const loader = new GLTFLoader();
     const texLoader = new THREE.TextureLoader();
 
+    // 使用 Vite 的 BASE_URL 确保开发和生产环境路径都正确
+    const base = (typeof import.meta.env !== 'undefined' && import.meta.env.BASE_URL) || '/';
+
     // 加载贴图
-    const colorTex = texLoader.load('/model/color.png');
+    const colorTex = texLoader.load(base + 'model/color.png');
     colorTex.flipY = true;
     colorTex.colorSpace = THREE.SRGBColorSpace;
 
-    const roughTex = texLoader.load('/model/roughness.png');
+    const roughTex = texLoader.load(base + 'model/roughness.png');
     roughTex.flipY = true;
 
-    loader.load('/model/tulip-split.glb', (gltf) => {
+    loader.load(base + 'model/tulip-split.glb', (gltf) => {
       const model = gltf.scene.clone(true);
       model.traverse(child => {
         if (!child.isMesh) return;

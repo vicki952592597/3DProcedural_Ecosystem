@@ -1,9 +1,9 @@
 import { defineConfig } from 'vite';
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
   root: '.',
-  // GitHub Pages 部署路径
-  base: '/3DProcedural_Ecosystem/',
+  // 仅生产构建时设置 GitHub Pages 路径，开发时保持 /
+  base: command === 'build' ? '/3DProcedural_Ecosystem/' : '/',
   server: {
     port: 3000,
     open: true
@@ -12,4 +12,4 @@ export default defineConfig({
     outDir: 'dist',
     assetsDir: 'assets',
   }
-});
+}));
