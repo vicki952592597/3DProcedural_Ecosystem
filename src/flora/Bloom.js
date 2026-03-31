@@ -110,6 +110,9 @@ export class Bloom {
     // 鼠标事件
     this._bindPointer(renderer);
 
+    // 原版 Canvas flat=true → NoToneMapping
+    renderer.toneMapping = THREE.NoToneMapping;
+
     // 启动动画
     this._animStartTime = this._clock.getElapsedTime();
     this._loaded = true;
@@ -271,8 +274,8 @@ export class Bloom {
       );
 
       // ─── 片元 Shader 注入 ───
-      // 原版 colorNode: mix(#000, texture, smoothstep(0,1, startProgress*2))
-      // + frontFacing 处理: if(faceDirection) normal=normal else normal=-normal
+      // 原版 colorNode: mix(0, texture(map), clamp(0, 1, startProgress*2))
+      // 原版 frontFacing: if(faceDirection) normal=abs(normal) else normal=normal
       shader.uniforms.uStartProgressF = uStartProgress;
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <common>',
@@ -281,11 +284,22 @@ export class Bloom {
         uniform float uStartProgressF;
         `
       );
+      // 法线处理 — 原版关键: frontFacing时取abs让背面也有正确光照
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <normal_fragment_begin>',
+        /* glsl */`
+        #include <normal_fragment_begin>
+        if (gl_FrontFacing) {
+          normal = abs(normal);
+        }
+        `
+      );
+      // 颜色淡入
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <color_fragment>',
         /* glsl */`
         #include <color_fragment>
-        float fadeIn = smoothstep(0.0, 1.0, uStartProgressF * 2.0);
+        float fadeIn = clamp(uStartProgressF * 2.0, 0.0, 1.0);
         diffuseColor.rgb = mix(vec3(0.0), diffuseColor.rgb, fadeIn);
         `
       );
@@ -452,7 +466,8 @@ export class Bloom {
         varying vec2 vUv;
         void main() {
           vec4 d = texture2D(tDistort, vUv);
-          vec2 uv = vUv + d.rg * 0.05;
+          // 原版 WebGPU 用 flipY，WebGL RT 不需要翻转
+          vec2 uv = vec2(vUv.x + d.r * 0.05, vUv.y);
           gl_FragColor = texture2D(tScene, uv);
         }
       `,
@@ -467,24 +482,24 @@ export class Bloom {
     const canvas = renderer.domElement;
     this._onMove = (e) => {
       const rect = canvas.getBoundingClientRect();
-      this._pointer.set(
-        ((e.clientX - rect.left) / rect.width) * 2 - 1,
-        -((e.clientY - rect.top) / rect.height) * 2 + 1
-      );
-      // NDC [0,1] for distortion
-      const nx = (e.clientX - rect.left) / rect.width;
-      const ny = (e.clientY - rect.top) / rect.height;
+      // R3F pointer: [-1, 1]
+      const px = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+      const py = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+      this._pointer.set(px, py);
+
+      // 原版: new Vector2(0.5*pointer.x+0.5, 0.5*pointer.y+0.5)
+      const nx = 0.5 * px + 0.5;
+      const ny = 0.5 * py + 0.5;
       this._lastNDC.copy(this._currNDC);
       this._currNDC.set(nx, ny);
+      // 原版 diff = delta.length()
       const dx = this._currNDC.x - this._lastNDC.x;
       const dy = this._currNDC.y - this._lastNDC.y;
       this._pointerDiff = Math.sqrt(dx * dx + dy * dy);
     };
-    this._onEnter = () => { this._isPointerEnter = true; };
-    this._onLeave = () => { this._isPointerEnter = false; };
+    // 原版: setIsPointerEnter 始终为 true
+    this._isPointerEnter = true;
     canvas.addEventListener('pointermove', this._onMove);
-    canvas.addEventListener('pointerenter', this._onEnter);
-    canvas.addEventListener('pointerleave', this._onLeave);
   }
 
   /* ─── update ─── */
@@ -595,8 +610,6 @@ export class Bloom {
     const canvas = this._renderer?.domElement;
     if (canvas) {
       canvas.removeEventListener('pointermove', this._onMove);
-      canvas.removeEventListener('pointerenter', this._onEnter);
-      canvas.removeEventListener('pointerleave', this._onLeave);
     }
   }
 }
