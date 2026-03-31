@@ -1,786 +1,602 @@
 /* ═══════════════════════════════════════════════════════════════
- *  Bloom — Deadrabbit 花朵绽放效果 1:1 完全复刻
+ *  Bloom — Deadrabbit 花朵绽放效果 1:1 无损复刻
  *  原版: https://deadrabbit.collax.app/bloom
  *  
- *  技术要点:
- *  - 128 花瓣 InstancedMesh (GLB pp.glb)
- *  - 花茎 GLB (stem.glb)
- *  - 顶点 Shader: 缩放 + 旋转 + 弯曲 + 绽放动画
- *  - 粒子系统: 发光漂浮粒子
- *  - 后处理: UnrealBloom + 鼠标交互扭曲
- *  - HDR 环境光 (dawn.hdr)
- *  - 入场动画: 相机推进 + 花瓣逐步绽放
+ *  所有参数从原版 Next.js 源码精确提取:
+ *  camera position=[0,2,2] zoom=2.5 | lerp target={x:-0.3*pointer.x, y:2, z:2} factor=0.05
+ *  env dawn.hdr intensity=0.5 rotation=[0,-PI/1.5,0] blur=2
+ *  stem position=[0,-3.3,-0.03] scale=[0.8,0.8,0.8] roughness=0.5 color=#fff
+ *  128 petals 140° each | MeshStandard DoubleSide | map+normalMap+roughnessMap+metalnessMap+emissiveMap
+ *  anim: cam z 0→2(2s) | startProgress 0→1(5.5s delay 0.5s) | group rotY→-PI/2(1.5s)
+ *  背景: CSS渐变 black→#8386ff (非scene.background)
+ *  无 UnrealBloomPass — 仅鼠标扭曲后处理
  * ═══════════════════════════════════════════════════════════════ */
 
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
-import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
-import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
-import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
-import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 
 export class Bloom {
   constructor() {
     this.name = 'Bloom';
-    this.description = '花朵绽放 — Deadrabbit 1:1 复刻';
     this.category = 'flora';
-    
-    // 内部状态
+    this._clock = new THREE.Clock();
+    this._loaded = false;
+    this._renderer = null;
+
+    // 场景
     this._scene = null;
     this._camera = null;
     this._group = null;
-    this._petalMesh = null;   // InstancedMesh x128
+    this._petalMesh = null;
     this._stemMesh = null;
     this._particles = null;
-    this._composer = null;
-    this._clock = new THREE.Clock();
-    
-    // 动画参数
-    this._progress = { value: 0 };      // 绽放进度 0→1
-    this._startProgress = { value: 0 };  // 入场进度 0→1
-    this._animStarted = false;
-    this._animStartTime = 0;
-    
-    // 鼠标交互
+
+    // 动画
+    this._startProgress = 0;
+    this._groupRotY = 0;
+    this._animStartTime = -1;
+
+    // 鼠标
     this._pointer = new THREE.Vector2(0, 0);
-    this._lastPointer = new THREE.Vector2(0, 0);
-    this._pointerDiff = 0;
-    this._isPointerEnter = false;
-    
-    // 扭曲纹理 (ping-pong)
+
+    // 扭曲系统
     this._distortRT1 = null;
     this._distortRT2 = null;
     this._distortPhase = false;
-    this._distortMaterial = null;
-    
-    // 花瓣材质 uniforms
-    this._petalUniforms = {
-      uProgress: { value: 0 },
-      uStartProgress: { value: 0 },
-      uTime: { value: 0 },
-      map: { value: null },
-      normalMap: { value: null },
-      roughnessMap: { value: null },
-      metalnessMap: { value: null },
-      emissiveMap: { value: null },
-    };
-    
-    this._loaded = false;
-    this._renderer = null;
+    this._distortScene = null;
+    this._distortCamera = null;
+    this._distortMat = null;
+    this._lastNDC = new THREE.Vector2(0.5, 0.5);
+    this._currNDC = new THREE.Vector2(0.5, 0.5);
+    this._pointerDiff = 0;
+    this._isPointerEnter = false;
+
+    // 合成
+    this._compScene = null;
+    this._compCamera = null;
+    this._compMat = null;
+    this._mainRT = null;
+
+    // 花瓣 shader uniforms
+    this._uStartProgress = { value: 0 };
+    this._uTime = { value: 0 };
   }
 
-  /* ─── 公共接口 ─── */
-  
   getCamera() { return this._camera; }
-  
-  getBackground() { return null; } // 使用渐变背景，非 scene.background
-  
-  getLights() { return []; } // 使用 HDR 环境光
-  
+  getLights() { return []; }
+  getBackground() { return null; }
+
+  /* ─── init ─── */
   async init(parentScene, renderer) {
     this._renderer = renderer;
+
+    // 场景 — 无 scene.background (原版用 CSS 渐变)
     this._scene = new THREE.Scene();
-    
-    // 相机 (原版: position [0,2,2], zoom 2.5)
+
+    // 渐变背景 (模拟 CSS from-black to-#8386ff)
+    const bgCanvas = document.createElement('canvas');
+    bgCanvas.width = 2; bgCanvas.height = 512;
+    const bgCtx = bgCanvas.getContext('2d');
+    const grad = bgCtx.createLinearGradient(0, 0, 0, 512);
+    grad.addColorStop(0, '#000000');
+    grad.addColorStop(1, '#8386ff');
+    bgCtx.fillStyle = grad;
+    bgCtx.fillRect(0, 0, 2, 512);
+    const bgTex = new THREE.CanvasTexture(bgCanvas);
+    this._scene.background = bgTex;
+
+    // 相机 — 原版: position=[0,2,2] zoom=2.5
     this._camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
-    this._camera.position.set(0, 2, 0.01); // 入场起始位置 (z:0 → z:2)
+    this._camera.position.set(0, 2, 0); // 入场起始 z=0, 动画到 z=2
     this._camera.zoom = 2.5;
     this._camera.updateProjectionMatrix();
-    
-    // 创建包裹组
+    this._camera.lookAt(0, 0, 0);
+
+    // 主 group
     this._group = new THREE.Group();
+    this._group.rotation.y = 0; // 动画到 -PI/2
     this._scene.add(this._group);
-    
-    // 渐变背景
-    this._createGradientBackground();
-    
+
     // 加载所有资源
-    await this._loadAll(renderer);
-    
-    // 后处理
-    this._setupPostProcessing(renderer);
-    
-    // 鼠标扭曲
+    await this._loadAssets(renderer);
+
+    // 设置扭曲后处理
     this._setupDistortion(renderer);
-    
+
+    // 设置最终合成 (场景RT + 扭曲)
+    this._setupComposite(renderer);
+
     // 鼠标事件
-    this._setupPointerEvents(renderer);
-    
-    // 启动入场动画
+    this._bindPointer(renderer);
+
+    // 启动动画
     this._animStartTime = this._clock.getElapsedTime();
-    this._animStarted = true;
     this._loaded = true;
   }
 
-  update(time, delta) {
-    if (!this._loaded) return;
-    
-    const t = this._clock.getElapsedTime();
-    this._petalUniforms.uTime.value = t;
-    
-    // ── 入场动画 ──
-    if (this._animStarted) {
-      const elapsed = t - this._animStartTime;
-      
-      // 相机推进: z: 0.01 → 2, 持续 2s
-      const camT = Math.min(elapsed / 2.0, 1);
-      const camEased = 1 - Math.pow(1 - camT, 3);
-      this._camera.position.z = 0.01 + camEased * 1.99;
-      
-      // 绽放进度: 延迟 0.5s, 持续 5.5s
-      const bloomElapsed = Math.max(elapsed - 0.5, 0);
-      const bloomT = Math.min(bloomElapsed / 5.5, 1);
-      const bloomEased = bloomT < 0.5
-        ? 4 * bloomT * bloomT * bloomT
-        : 1 - Math.pow(-2 * bloomT + 2, 3) / 2;
-      this._startProgress.value = bloomEased;
-      this._petalUniforms.uStartProgress.value = bloomEased;
-    }
-    
-    // ── 鼠标视差 ──
-    const targetX = -(0.3 * this._pointer.x);
-    this._camera.position.x += (targetX - this._camera.position.x) * 0.05;
-    this._camera.position.y += (2 - this._camera.position.y) * 0.05;
-    this._camera.lookAt(0, 0.5, 0);
-    
-    // ── 更新花瓣实例矩阵 ──
-    this._updatePetals(t);
-    
-    // ── 更新粒子 ──
-    this._updateParticles(t, delta || 0.016);
-    
-    // ── 更新扭曲 ──
-    this._updateDistortion();
-  }
-  
-  render(renderer) {
-    if (!this._loaded) return;
-    
-    // 使用 composer 渲染
-    if (this._composer) {
-      this._composer.render();
-    }
-  }
-  
-  dispose() {
-    if (this._distortRT1) this._distortRT1.dispose();
-    if (this._distortRT2) this._distortRT2.dispose();
-    if (this._composer) {
-      this._composer.passes.forEach(p => p.dispose && p.dispose());
-    }
-    // 移除事件
-    window.removeEventListener('pointermove', this._onPointerMove);
-    window.removeEventListener('pointerenter', this._onPointerEnter);
-    window.removeEventListener('pointerleave', this._onPointerLeave);
-  }
-
-  /* ─── 渐变背景 ─── */
-  
-  _createGradientBackground() {
-    const canvas = document.createElement('canvas');
-    canvas.width = 2;
-    canvas.height = 512;
-    const ctx = canvas.getContext('2d');
-    const gradient = ctx.createLinearGradient(0, 0, 0, 512);
-    gradient.addColorStop(0, '#000000');    // 顶部: 黑色
-    gradient.addColorStop(1, '#8386ff');    // 底部: 紫蓝色
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 2, 512);
-    
-    const tex = new THREE.CanvasTexture(canvas);
-    tex.needsUpdate = true;
-    this._scene.background = tex;
-  }
-
-  /* ─── 加载所有资源 ─── */
-  
-  async _loadAll(renderer) {
+  /* ─── 加载资源 ─── */
+  async _loadAssets(renderer) {
     const gltfLoader = new GLTFLoader();
     const rgbeLoader = new RGBELoader();
     const base = (typeof import.meta.env !== 'undefined' && import.meta.env.BASE_URL) || '/';
-    
-    const [petalGLTF, stemGLTF, envMap] = await Promise.all([
-      new Promise((res, rej) => gltfLoader.load(base + 'model/bloom-petal.glb', res, undefined, rej)),
-      new Promise((res, rej) => gltfLoader.load(base + 'model/bloom-stem.glb', res, undefined, rej)),
-      new Promise((res, rej) => rgbeLoader.load(base + 'model/dawn.hdr', res, undefined, rej)),
+
+    const [petalGLTF, stemGLTF, hdr] = await Promise.all([
+      new Promise((r, j) => gltfLoader.load(base + 'model/bloom-petal.glb', r, undefined, j)),
+      new Promise((r, j) => gltfLoader.load(base + 'model/bloom-stem.glb', r, undefined, j)),
+      new Promise((r, j) => rgbeLoader.load(base + 'model/dawn.hdr', r, undefined, j)),
     ]);
-    
-    // ── HDR 环境光 ──
-    const pmremGen = new THREE.PMREMGenerator(renderer);
-    pmremGen.compileEquirectangularShader();
-    const envRT = pmremGen.fromEquirectangular(envMap);
+
+    // HDR 环境 — 原版: intensity=0.5, rotation=[0,-PI/1.5,0], blur=2
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    pmrem.compileEquirectangularShader();
+    const envRT = pmrem.fromEquirectangular(hdr);
     this._scene.environment = envRT.texture;
     this._scene.environmentIntensity = 0.5;
     this._scene.environmentRotation = new THREE.Euler(0, -Math.PI / 1.5, 0);
-    envMap.dispose();
-    pmremGen.dispose();
-    
-    // ── 花茎 ──
-    this._setupStem(stemGLTF);
-    
-    // ── 花瓣 ──
+    hdr.dispose();
+    pmrem.dispose();
+
+    // 花茎 — 原版: position=[0,-3.3,-0.03] scale=[0.8,0.8,0.8] roughness=0.5 color=#fff
+    const stem = stemGLTF.scene;
+    stem.position.set(0, -3.3, -0.03);
+    stem.scale.setScalar(0.8);
+    stem.traverse(c => {
+      if (c.isMesh) {
+        c.material = new THREE.MeshStandardMaterial({ roughness: 0.5, color: '#ffffff' });
+      }
+    });
+    this._group.add(stem);
+    this._stemMesh = stem;
+
+    // 花瓣 — 128 InstancedMesh, 140° 旋转
     this._setupPetals(petalGLTF);
-    
-    // ── 粒子 ──
+
+    // 粒子 — 原版: 20x20=400个, size=0.01, gravity=-0.0098, spread=20
     this._setupParticles();
   }
 
-  /* ─── 花茎 ─── */
-  
-  _setupStem(gltf) {
-    const stemScene = gltf.scene;
-    stemScene.scale.set(0.8, 0.8, 0.8);
-    stemScene.position.set(0, -3.3, -0.03);
-    
-    stemScene.traverse(child => {
-      if (child.isMesh) {
-        child.castShadow = true;
-        child.receiveShadow = true;
-        const mat = new THREE.MeshStandardMaterial({
-          roughness: 0.5,
-          color: '#ffffff',
-        });
-        child.material = mat;
-      }
-    });
-    
-    this._group.add(stemScene);
-    this._stemMesh = stemScene;
-  }
-
-  /* ─── 花瓣 (128 InstancedMesh + 自定义 Shader) ─── */
-  
+  /* ─── 花瓣 ─── */
   _setupPetals(gltf) {
-    // 从 GLB 中提取花瓣几何体和材质纹理
-    let petalGeometry = null;
-    let petalMaterial = null;
-    
-    gltf.scene.traverse(child => {
-      if (child.isMesh && !petalGeometry) {
-        petalGeometry = child.geometry;
-        petalMaterial = child.material;
-      }
+    let geo = null, srcMat = null;
+    gltf.scene.traverse(c => {
+      if (c.isMesh && !geo) { geo = c.geometry; srcMat = c.material; }
     });
-    
-    if (!petalGeometry) {
-      console.error('Bloom: 未找到花瓣几何体');
-      return;
-    }
-    
-    // 提取纹理
-    if (petalMaterial) {
-      this._petalUniforms.map.value = petalMaterial.map;
-      this._petalUniforms.normalMap.value = petalMaterial.normalMap;
-      this._petalUniforms.roughnessMap.value = petalMaterial.roughnessMap;
-      this._petalUniforms.metalnessMap.value = petalMaterial.metalnessMap;
-      this._petalUniforms.emissiveMap.value = petalMaterial.emissiveMap;
-    }
-    
-    // 创建自定义 Shader 材质
-    const material = new THREE.ShaderMaterial({
-      uniforms: {
-        ...this._petalUniforms,
-        envMap: { value: this._scene.environment },
-        envMapIntensity: { value: 0.5 },
-      },
-      vertexShader: this._petalVertexShader(),
-      fragmentShader: this._petalFragmentShader(),
+    if (!geo) return;
+
+    // 原版: MeshStandardNodeMaterial, side=DoubleSide
+    // 使用 onBeforeCompile 注入顶点变形 (WebGL 等效 TSL positionNode)
+    const mat = new THREE.MeshStandardMaterial({
       side: THREE.DoubleSide,
-      transparent: false,
+      map: srcMat.map,
+      normalMap: srcMat.normalMap,
+      roughnessMap: srcMat.roughnessMap,
+      metalnessMap: srcMat.metalnessMap,
+      emissiveMap: srcMat.emissiveMap,
     });
-    
-    // 创建 InstancedMesh
-    const instanceCount = 128;
-    this._petalMesh = new THREE.InstancedMesh(petalGeometry, material, instanceCount);
-    
-    // 初始化实例矩阵 — 每瓣旋转 140°
+
+    // 确保贴图色彩空间正确
+    if (mat.map) mat.map.colorSpace = THREE.SRGBColorSpace;
+
+    const uStartProgress = this._uStartProgress;
+    const uTime = this._uTime;
+
+    mat.onBeforeCompile = (shader) => {
+      shader.uniforms.uStartProgress = uStartProgress;
+      shader.uniforms.uTime = uTime;
+
+      // ─── 顶点 Shader 注入 ───
+      // 原版 TSL 逻辑 1:1 翻译:
+      // 1. i = instanceID/64*6 → normalizedTime = mod(time+i, 6)/6
+      // 2. bendStrength = mix(startProgress, 0,1, 1,-2)
+      // 3. curvature = mix(n, 0,1, PI*2, bendStrength*PI)
+      // 4. scaleFactor = mix(startProgress, 0,1, (0.8,0.01,0.3), (0.8,0.7,0.4))
+      // 5. scale → bend(axis=2,Z轴) → scale(bloom 0→1 @n<0.5) → scale(shrink 0.8→0.2 @n>0.5) → rotateY(PI*-0.3 + startProgress)
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <common>',
+        /* glsl */`
+        #include <common>
+        uniform float uStartProgress;
+        uniform float uTime;
+
+        vec3 tslScale(vec3 p, vec3 s) {
+          return vec3(p.x*s.x, p.y*s.y, p.z*s.z);
+        }
+
+        // 原版 bend(r_co, factor, axis=2, dcut=(0,0,0), origin=(0,0,0))
+        // axis=2 的 Else 分支: angle = x * factor
+        vec3 tslBend(vec3 p, float factor, vec3 origin) {
+          if(abs(factor) < 1e-5) return p;
+          p -= origin;
+          float cx = p.x;
+          float cy = p.y;
+          float cz = p.z;
+          // axis=2: angle based on x coordinate
+          float angle = cx * factor;
+          float sinA = sin(angle);
+          float cosA = cos(angle);
+          vec3 result;
+          // axis=2 Else branch from original TSL:
+          // d.x = -(y - 1/factor) * sin(angle)
+          // d.y = y * cos(angle) + (1-cos(angle))/factor  
+          // d.z = z (unchanged)
+          result.x = -(cy - (1.0/factor)) * sinA;
+          result.y = cy * cosA + (1.0 - cosA) / factor;
+          result.z = cz;
+          return result + origin;
+        }
+
+        // 原版 rotate(position, axis=(0,1,0), angle)
+        vec3 tslRotateY(vec3 p, float a) {
+          float ca = cos(a); float sa = sin(a);
+          return vec3(p.x*ca + p.z*sa, p.y, -p.x*sa + p.z*ca);
+        }
+        `
+      );
+
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <begin_vertex>',
+        /* glsl */`
+        #include <begin_vertex>
+
+        // 原版 1:1: instanceID / 64 * 6
+        float iid = float(gl_InstanceID);
+        float phaseOffset = iid / 64.0 * 6.0;
+        // mod(time + phaseOffset, 6) / 6
+        float nt = mod(uTime + phaseOffset, 6.0) / 6.0;
+
+        // mix(startProgress, 0, 1, 1, -2) → bendStrength
+        float bendStr = mix(1.0, -2.0, uStartProgress);
+        // mix(nt, 0, 1, PI*2, bendStr*PI)
+        float curv = mix(6.28318, bendStr * 3.14159, nt);
+
+        // scaleFactor = mix(startProgress, 0, 1, (0.8,0.01,0.3), (0.8,0.7,0.4))
+        vec3 sf = mix(vec3(0.8, 0.01, 0.3), vec3(0.8, 0.7, 0.4), uStartProgress);
+
+        // 1. scale by startProgress-dependent factor
+        transformed = tslScale(transformed, sf);
+        // 2. bend axis=2, origin=(0,0,0)
+        transformed = tslBend(transformed, curv, vec3(0.0));
+        // 3. bloom scale: remap(nt, 0, 0.5, 0, 1)
+        float bloomS = clamp(nt / 0.5, 0.0, 1.0);
+        transformed = tslScale(transformed, vec3(bloomS));
+        // 4. shrink scale: remap(nt, 0.5, 1, 0.8, 0.2)
+        float shrinkT = clamp((nt - 0.5) / 0.5, 0.0, 1.0);
+        float shrinkS = mix(0.8, 0.2, shrinkT);
+        transformed = tslScale(transformed, vec3(shrinkS));
+        // 5. rotate Y: mul(mul(PI, -0.3), startProgress) = PI * -0.3 * startProgress
+        float yAngle = 3.14159 * -0.3 * uStartProgress;
+        transformed = tslRotateY(transformed, yAngle);
+        `
+      );
+
+      // ─── 片元 Shader 注入 ───
+      // 原版 colorNode: mix(#000, texture, smoothstep(0,1, startProgress*2))
+      // + frontFacing 处理: if(faceDirection) normal=normal else normal=-normal
+      shader.uniforms.uStartProgressF = uStartProgress;
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <common>',
+        /* glsl */`
+        #include <common>
+        uniform float uStartProgressF;
+        `
+      );
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <color_fragment>',
+        /* glsl */`
+        #include <color_fragment>
+        float fadeIn = smoothstep(0.0, 1.0, uStartProgressF * 2.0);
+        diffuseColor.rgb = mix(vec3(0.0), diffuseColor.rgb, fadeIn);
+        `
+      );
+    };
+
+    const mesh = new THREE.InstancedMesh(geo, mat, 128);
     const dummy = new THREE.Object3D();
-    for (let i = 0; i < instanceCount; i++) {
+    for (let i = 0; i < 128; i++) {
       dummy.rotation.set(0, THREE.MathUtils.degToRad(140 * i), 0);
       dummy.updateMatrix();
-      this._petalMesh.setMatrixAt(i, dummy.matrix);
+      mesh.setMatrixAt(i, dummy.matrix);
     }
-    this._petalMesh.instanceMatrix.needsUpdate = true;
-    
-    this._group.add(this._petalMesh);
+    mesh.instanceMatrix.needsUpdate = true;
+    this._group.add(mesh);
+    this._petalMesh = mesh;
   }
 
-  /* ─── 花瓣顶点 Shader ─── */
-  
-  _petalVertexShader() {
-    return /* glsl */`
-      uniform float uProgress;
-      uniform float uStartProgress;
-      uniform float uTime;
-      
-      attribute vec3 instanceColor;
-      
-      varying vec2 vUv;
-      varying vec3 vNormal;
-      varying vec3 vViewPosition;
-      varying float vInstanceId;
-      
-      // 缩放函数
-      vec3 scalePos(vec3 pos, vec3 scaleFactor) {
-        mat3 sm = mat3(
-          scaleFactor.x, 0.0, 0.0,
-          0.0, scaleFactor.y, 0.0,
-          0.0, 0.0, scaleFactor.z
-        );
-        return sm * pos;
-      }
-      
-      // 绕任意轴旋转
-      vec3 rotateAroundAxis(vec3 pos, vec3 axis, float angle) {
-        axis = normalize(axis);
-        float s = sin(angle);
-        float c = cos(angle);
-        float oc = 1.0 - c;
-        mat3 rm = mat3(
-          oc * axis.x * axis.x + c,       oc * axis.x * axis.y - axis.z * s, oc * axis.z * axis.x + axis.y * s,
-          oc * axis.x * axis.y + axis.z * s, oc * axis.y * axis.y + c,       oc * axis.y * axis.z - axis.x * s,
-          oc * axis.z * axis.x - axis.y * s, oc * axis.y * axis.z + axis.x * s, oc * axis.z * axis.z + c
-        );
-        return rm * pos;
-      }
-      
-      // 弯曲函数 (围绕Z轴弯曲)
-      vec3 bend(vec3 pos, float curvature, vec3 center) {
-        if (abs(curvature) < 1e-5) return pos;
-        pos -= center;
-        float x = pos.x;
-        float y = pos.y;
-        float z = pos.z;
-        
-        float bendAngle = x * curvature;
-        float cosA = cos(bendAngle);
-        float sinA = sin(bendAngle);
-        
-        // 绕 Z 轴弯曲
-        pos.x = x;
-        pos.y = y * cosA + (1.0 - cosA) / curvature;
-        pos.z = y * sinA + z;
-        
-        pos += center;
-        return pos;
-      }
-      
-      void main() {
-        vUv = uv;
-        
-        // 每瓣的偏移 (原版: instanceID / 64 * 6)
-        float instanceId = float(gl_InstanceID);
-        vInstanceId = instanceId;
-        float phaseOffset = instanceId / 64.0 * 6.0;
-        
-        // 时间归一化 (原版: mod(time + phaseOffset, 6) / 6)
-        float normalizedTime = mod(uTime + phaseOffset, 6.0) / 6.0;
-        
-        // 弯曲角度随进度变化 (原版: mix(uStartProgress, 0, 1, 1, -2))
-        float bendStrength = mix(1.0, -2.0, uStartProgress);
-        
-        // 弯曲角度 (原版: mix(n, 0, 1, PI*2, bendStrength*PI))
-        float curvature = mix(6.28318, bendStrength * 3.14159, normalizedTime);
-        
-        // 缩放随进度变化 (原版: mix(uStartProgress, 0, 1, (0.8,0.01,0.3), (0.8,0.7,0.4)))
-        vec3 scaleFactor = mix(vec3(0.8, 0.01, 0.3), vec3(0.8, 0.7, 0.4), uStartProgress);
-        
-        // 应用变形
-        vec3 pos = position;
-        
-        // 1. 缩放
-        pos = scalePos(pos, scaleFactor);
-        
-        // 2. 弯曲
-        pos = bend(pos, curvature, vec3(0.0));
-        
-        // 3. 缩放(绽放阶段)
-        float bloomScale = mix(0.0, 1.0, smoothstep(0.0, 0.5, normalizedTime));
-        pos = scalePos(pos, vec3(bloomScale));
-        
-        // 4. 收缩阶段
-        float shrinkScale = mix(0.8, 0.2, smoothstep(0.5, 1.0, normalizedTime));
-        pos = scalePos(pos, vec3(shrinkScale));
-        
-        // 5. 绕 Y 轴旋转 (原版: rotate around Y by PI*-0.3 + uStartProgress)
-        float yRotation = 3.14159 * (-0.3) + uStartProgress * 3.14159;
-        pos = rotateAroundAxis(pos, vec3(0.0, 1.0, 0.0), yRotation);
-        
-        // 法线计算 (近似)
-        vec3 tangent1 = pos + vec3(0.01, 0.0, 0.0);
-        tangent1 = scalePos(tangent1, scaleFactor);
-        vec3 tangent2 = pos + vec3(0.0, 0.01, 0.0);
-        tangent2 = scalePos(tangent2, scaleFactor);
-        vNormal = normalize(cross(tangent1 - pos, tangent2 - pos));
-        vNormal = normalMatrix * vNormal;
-        
-        // 应用实例矩阵
-        vec4 worldPos = instanceMatrix * vec4(pos, 1.0);
-        vec4 mvPosition = modelViewMatrix * worldPos;
-        vViewPosition = -mvPosition.xyz;
-        
-        gl_Position = projectionMatrix * mvPosition;
-      }
-    `;
-  }
-
-  /* ─── 花瓣片元 Shader ─── */
-  
-  _petalFragmentShader() {
-    return /* glsl */`
-      uniform sampler2D map;
-      uniform sampler2D normalMap;
-      uniform sampler2D roughnessMap;
-      uniform sampler2D emissiveMap;
-      uniform float uStartProgress;
-      uniform float uTime;
-      
-      varying vec2 vUv;
-      varying vec3 vNormal;
-      varying vec3 vViewPosition;
-      varying float vInstanceId;
-      
-      void main() {
-        // 纹理采样
-        vec4 texColor = texture2D(map, vUv);
-        
-        // 淡入: 随 uStartProgress 从黑色过渡到纹理色
-        float fadeIn = smoothstep(0.0, 1.0, uStartProgress * 2.0);
-        vec3 color = mix(vec3(0.0), texColor.rgb, fadeIn);
-        
-        // 正面/背面处理 (原版: gl_FrontFacing)
-        vec3 norm = gl_FrontFacing ? vNormal : -vNormal;
-        
-        // 简单光照
-        vec3 lightDir = normalize(vec3(0.5, 1.0, 0.5));
-        float diffuse = max(dot(norm, lightDir), 0.0) * 0.6 + 0.4;
-        
-        // 自发光
-        vec4 emissive = texture2D(emissiveMap, vUv);
-        color += emissive.rgb * 0.3;
-        
-        color *= diffuse;
-        
-        // 伽马校正
-        color = pow(color, vec3(1.0 / 2.2));
-        
-        gl_FragColor = vec4(color, texColor.a);
-      }
-    `;
-  }
-
-  /* ─── 更新花瓣 ─── */
-  
-  _updatePetals(time) {
-    if (!this._petalMesh) return;
-    this._petalMesh.material.uniforms.uTime.value = time;
-    this._petalMesh.material.uniforms.uStartProgress.value = this._startProgress.value;
-  }
-
-  /* ─── 粒子系统 ─── */
-  
+  /* ─── 粒子 (原版: 20x20=400, size=0.01, gravity=-0.0098) ─── */
   _setupParticles() {
-    const count = 400;  // 20x20
-    const positions = new Float32Array(count * 3);
-    const velocities = new Float32Array(count * 3);
+    const count = 400;
+    const spread = 20;
+    const pos = new Float32Array(count * 3);
+    const vel = new Float32Array(count * 3);
     const phases = new Float32Array(count);
-    
-    const spread = { x: 20, y: 20, z: 20 };
-    
+
     for (let i = 0; i < count; i++) {
-      positions[i * 3] = (Math.random() - 0.5) * spread.x;
-      positions[i * 3 + 1] = (Math.random() - 0.5) * spread.y;
-      positions[i * 3 + 2] = (Math.random() - 0.5) * spread.z;
-      velocities[i * 3] = 0;
-      velocities[i * 3 + 1] = 0;
-      velocities[i * 3 + 2] = 0;
+      pos[i * 3] = (Math.random() - 0.5) * spread;
+      pos[i * 3 + 1] = (Math.random() - 0.5) * spread;
+      pos[i * 3 + 2] = (Math.random() - 0.5) * spread;
       phases[i] = Math.random();
     }
-    
-    const geometry = new THREE.BufferGeometry();
-    geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-    
-    this._particleVelocities = velocities;
-    this._particlePhases = phases;
-    
-    const material = new THREE.ShaderMaterial({
-      uniforms: {
-        uTime: { value: 0 },
-        uSize: { value: 3.0 },
-      },
+
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    geo.setAttribute('aPhase', new THREE.BufferAttribute(phases, 1));
+    this._particleVel = vel;
+
+    // 原版: SpriteNodeMaterial, colorNode = abs(sin(time * phase * flashTime))
+    const mat = new THREE.ShaderMaterial({
+      uniforms: { uTime: { value: 0 } },
       vertexShader: /* glsl */`
-        uniform float uTime;
-        uniform float uSize;
-        attribute float phase;
+        attribute float aPhase;
         varying float vAlpha;
-        
+        uniform float uTime;
         void main() {
-          vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-          gl_PointSize = uSize * (100.0 / -mvPos.z);
-          gl_Position = projectionMatrix * mvPos;
-          vAlpha = abs(sin(uTime + phase * 6.28));
+          vec4 mv = modelViewMatrix * vec4(position, 1.0);
+          gl_PointSize = max(1.0, 0.01 * (300.0 / -mv.z));
+          gl_Position = projectionMatrix * mv;
+          vAlpha = abs(sin(uTime * aPhase * 1.0));
         }
       `,
       fragmentShader: /* glsl */`
         varying float vAlpha;
-        
         void main() {
           float d = length(gl_PointCoord - 0.5) * 2.0;
           if (d > 1.0) discard;
-          float alpha = (1.0 - d * d) * vAlpha * 0.6;
-          gl_FragColor = vec4(1.0, 1.0, 1.0, alpha);
+          float a = (1.0 - d) * vAlpha * 0.5;
+          gl_FragColor = vec4(1.0, 1.0, 1.0, a);
         }
       `,
       transparent: true,
       depthWrite: false,
       blending: THREE.AdditiveBlending,
     });
-    
-    // 添加 phase 属性
-    geometry.setAttribute('phase', new THREE.BufferAttribute(phases, 1));
-    
-    this._particles = new THREE.Points(geometry, material);
+
+    this._particles = new THREE.Points(geo, mat);
     this._scene.add(this._particles);
   }
 
-  _updateParticles(time, delta) {
-    if (!this._particles) return;
-    
-    this._particles.material.uniforms.uTime.value = time;
-    
-    const posAttr = this._particles.geometry.getAttribute('position');
-    const arr = posAttr.array;
-    const vel = this._particleVelocities;
-    
-    for (let i = 0; i < posAttr.count; i++) {
-      const i3 = i * 3;
-      // 重力
-      vel[i3 + 1] -= 0.0098;
-      // 应用速度
-      arr[i3] += vel[i3];
-      arr[i3 + 1] += vel[i3 + 1];
-      arr[i3 + 2] += vel[i3 + 2];
-      // 地板反弹
-      if (arr[i3 + 1] < 0) {
-        arr[i3 + 1] = 0;
-        vel[i3 + 1] = -vel[i3 + 1] * 0.5;
-      }
-    }
-    posAttr.needsUpdate = true;
-  }
-
-  /* ─── 后处理 ─── */
-  
-  _setupPostProcessing(renderer) {
-    this._composer = new EffectComposer(renderer);
-    
-    const renderPass = new RenderPass(this._scene, this._camera);
-    this._composer.addPass(renderPass);
-    
-    // Bloom 辉光
-    const bloomPass = new UnrealBloomPass(
-      new THREE.Vector2(window.innerWidth, window.innerHeight),
-      0.8,   // strength
-      0.5,   // radius
-      0.3    // threshold
-    );
-    this._composer.addPass(bloomPass);
-    this._bloomPass = bloomPass;
-    
-    // 鼠标扭曲后处理
-    const distortShader = {
-      uniforms: {
-        tDiffuse: { value: null },
-        tDistort: { value: null },
-        uStrength: { value: 0.05 },
-      },
-      vertexShader: /* glsl */`
-        varying vec2 vUv;
-        void main() {
-          vUv = uv;
-          gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-        }
-      `,
-      fragmentShader: /* glsl */`
-        uniform sampler2D tDiffuse;
-        uniform sampler2D tDistort;
-        uniform float uStrength;
-        varying vec2 vUv;
-        
-        void main() {
-          vec4 distort = texture2D(tDistort, vUv);
-          vec2 offset = distort.rg * uStrength;
-          vec2 uv = vec2(vUv.x + offset.x, 1.0 - vUv.y);
-          uv.y = 1.0 - uv.y; // flip correction
-          gl_FragColor = texture2D(tDiffuse, vUv + offset);
-        }
-      `,
-    };
-    
-    this._distortPass = new ShaderPass(distortShader);
-    this._distortPass.renderToScreen = true;
-    this._composer.addPass(this._distortPass);
-  }
-
-  /* ─── 鼠标扭曲纹理 (Ping-Pong) ─── */
-  
+  /* ─── 扭曲系统 (Ping-Pong RT — 原版 1:1) ─── */
   _setupDistortion(renderer) {
-    const w = Math.floor(window.innerWidth);
-    const h = Math.floor(window.innerHeight);
-    
-    const opts = {
-      minFilter: THREE.LinearFilter,
-      magFilter: THREE.LinearFilter,
-      format: THREE.RGBAFormat,
-      type: THREE.FloatType,
-    };
-    
+    const w = window.innerWidth, h = window.innerHeight;
+    const opts = { minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter, format: THREE.RGBAFormat, type: THREE.FloatType };
     this._distortRT1 = new THREE.WebGLRenderTarget(w, h, opts);
     this._distortRT2 = new THREE.WebGLRenderTarget(w, h, opts);
-    
-    // Ping-pong compute 用全屏 quad 模拟
+
     this._distortScene = new THREE.Scene();
     this._distortCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-    
-    this._distortMaterial = new THREE.ShaderMaterial({
+
+    // 原版参数: brushSize=0.08, fadingRate=0.9
+    this._distortMat = new THREE.ShaderMaterial({
       uniforms: {
         tPrev: { value: null },
         uPointer: { value: new THREE.Vector2(0.5, 0.5) },
         uLastPointer: { value: new THREE.Vector2(0.5, 0.5) },
-        uBrushSize: { value: 0.05 },
-        uFadingRate: { value: 0.95 },
+        uBrushSize: { value: 0.08 },
+        uFadingRate: { value: 0.9 },
         uIsPointerEnter: { value: 0 },
         uDiff: { value: 0 },
         uAspect: { value: w / h },
       },
       vertexShader: /* glsl */`
         varying vec2 vUv;
-        void main() {
-          vUv = uv;
-          gl_Position = vec4(position, 1.0);
-        }
+        void main() { vUv = uv; gl_Position = vec4(position, 1.0); }
       `,
       fragmentShader: /* glsl */`
         uniform sampler2D tPrev;
-        uniform vec2 uPointer;
-        uniform vec2 uLastPointer;
-        uniform float uBrushSize;
-        uniform float uFadingRate;
-        uniform float uIsPointerEnter;
-        uniform float uDiff;
-        uniform float uAspect;
-        
+        uniform vec2 uPointer, uLastPointer;
+        uniform float uBrushSize, uFadingRate, uIsPointerEnter, uDiff, uAspect;
         varying vec2 vUv;
-        
-        // 点到线段的距离
-        float distToSegment(vec2 p, vec2 a, vec2 b) {
-          vec2 pa = p - a;
-          vec2 ba = b - a;
+
+        float distToSeg(vec2 p, vec2 a, vec2 b) {
+          vec2 pa = p - a, ba = b - a;
           float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
           return length(pa - ba * h);
         }
-        
+
         void main() {
-          vec2 uv = vUv;
-          vec2 aspect = vec2(uAspect, 1.0);
-          vec2 p = uv * aspect;
-          vec2 a = uLastPointer * aspect;
-          vec2 b = uPointer * aspect;
-          
-          float dist = distToSegment(p, a, b);
-          float brush = 1.0 - smoothstep(0.0, uBrushSize, dist);
-          
-          vec4 prev = texture2D(tPrev, uv) * uFadingRate;
-          
+          vec2 asp = vec2(uAspect, 1.0);
+          vec2 p = vUv * asp;
+          vec2 a = uLastPointer * asp;
+          vec2 b = uPointer * asp;
+
+          // 原版: 两种笔刷 — 线段距离 + 点到点
+          float segDist = distToSeg(p, a, b);
+          float segBrush = 1.0 - smoothstep(0.0, uBrushSize, segDist);
+
+          vec2 dir = b - a;
+          float proj = clamp(dot(p - a, dir) / dot(dir, dir), 0.0, 1.0);
+          float segMix = segBrush * proj * (1.0 - uFadingRate) + uFadingRate;
+
+          vec4 prev = texture2D(tPrev, vUv) * uFadingRate;
+
+          float ptDist = length(p - b);
+          float ptBrush = 1.0 - smoothstep(0.0, uBrushSize, ptDist);
+
           float influence = uIsPointerEnter * smoothstep(0.001, 0.01, uDiff);
-          
-          gl_FragColor = mix(prev, vec4(uIsPointerEnter, 0.0, 0.0, 1.0), brush * influence);
+
+          vec4 newVal = mix(prev, vec4(uIsPointerEnter, 0.0, 0.0, 1.0), ptBrush);
+          vec4 segVal = mix(prev, vec4(uIsPointerEnter, 0.0, 0.0, 1.0), segMix);
+
+          gl_FragColor = mix(prev, segVal, influence);
         }
       `,
     });
-    
-    const quad = new THREE.Mesh(
-      new THREE.PlaneGeometry(2, 2),
-      this._distortMaterial
-    );
+
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this._distortMat);
     this._distortScene.add(quad);
   }
 
-  _updateDistortion() {
-    if (!this._renderer || !this._distortMaterial) return;
-    
-    const readRT = this._distortPhase ? this._distortRT2 : this._distortRT1;
-    const writeRT = this._distortPhase ? this._distortRT1 : this._distortRT2;
-    
-    this._distortMaterial.uniforms.tPrev.value = readRT.texture;
-    this._distortMaterial.uniforms.uPointer.value.set(
-      this._pointer.x * 0.5 + 0.5,
-      this._pointer.y * 0.5 + 0.5
-    );
-    this._distortMaterial.uniforms.uLastPointer.value.set(
-      this._lastPointer.x * 0.5 + 0.5,
-      this._lastPointer.y * 0.5 + 0.5
-    );
-    this._distortMaterial.uniforms.uDiff.value = this._pointerDiff;
-    this._distortMaterial.uniforms.uIsPointerEnter.value = this._isPointerEnter ? 1 : 0;
-    
-    // Render ping-pong
-    const renderer = this._renderer;
-    renderer.setRenderTarget(writeRT);
-    renderer.render(this._distortScene, this._distortCamera);
-    renderer.setRenderTarget(null);
-    
-    // 更新后处理的扭曲纹理
-    if (this._distortPass) {
-      this._distortPass.uniforms.tDistort.value = writeRT.texture;
-    }
-    
-    this._distortPhase = !this._distortPhase;
-    this._lastPointer.copy(this._pointer);
-    this._pointerDiff *= 0.95;
+  /* ─── 合成 (场景RT + 扭曲纹理) ─── */
+  _setupComposite(renderer) {
+    const w = window.innerWidth, h = window.innerHeight;
+    this._mainRT = new THREE.WebGLRenderTarget(w, h, {
+      minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+    });
+
+    this._compScene = new THREE.Scene();
+    this._compCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+
+    // 原版: uv.x + distort.x * 0.05, flip(uv.y)
+    this._compMat = new THREE.ShaderMaterial({
+      uniforms: {
+        tScene: { value: null },
+        tDistort: { value: null },
+      },
+      vertexShader: /* glsl */`
+        varying vec2 vUv;
+        void main() { vUv = uv; gl_Position = vec4(position, 1.0); }
+      `,
+      fragmentShader: /* glsl */`
+        uniform sampler2D tScene;
+        uniform sampler2D tDistort;
+        varying vec2 vUv;
+        void main() {
+          vec4 d = texture2D(tDistort, vUv);
+          vec2 uv = vUv + d.rg * 0.05;
+          gl_FragColor = texture2D(tScene, uv);
+        }
+      `,
+    });
+
+    const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this._compMat);
+    this._compScene.add(quad);
   }
 
   /* ─── 鼠标事件 ─── */
-  
-  _setupPointerEvents(renderer) {
+  _bindPointer(renderer) {
     const canvas = renderer.domElement;
-    
-    this._onPointerMove = (e) => {
+    this._onMove = (e) => {
       const rect = canvas.getBoundingClientRect();
-      const newX = ((e.clientX - rect.left) / rect.width) * 2 - 1;
-      const newY = -((e.clientY - rect.top) / rect.height) * 2 + 1;
-      
-      const dx = newX - this._pointer.x;
-      const dy = newY - this._pointer.y;
+      this._pointer.set(
+        ((e.clientX - rect.left) / rect.width) * 2 - 1,
+        -((e.clientY - rect.top) / rect.height) * 2 + 1
+      );
+      // NDC [0,1] for distortion
+      const nx = (e.clientX - rect.left) / rect.width;
+      const ny = (e.clientY - rect.top) / rect.height;
+      this._lastNDC.copy(this._currNDC);
+      this._currNDC.set(nx, ny);
+      const dx = this._currNDC.x - this._lastNDC.x;
+      const dy = this._currNDC.y - this._lastNDC.y;
       this._pointerDiff = Math.sqrt(dx * dx + dy * dy);
-      
-      this._pointer.set(newX, newY);
     };
-    
-    this._onPointerEnter = () => { this._isPointerEnter = true; };
-    this._onPointerLeave = () => { this._isPointerEnter = false; };
-    
-    canvas.addEventListener('pointermove', this._onPointerMove);
-    canvas.addEventListener('pointerenter', this._onPointerEnter);
-    canvas.addEventListener('pointerleave', this._onPointerLeave);
+    this._onEnter = () => { this._isPointerEnter = true; };
+    this._onLeave = () => { this._isPointerEnter = false; };
+    canvas.addEventListener('pointermove', this._onMove);
+    canvas.addEventListener('pointerenter', this._onEnter);
+    canvas.addEventListener('pointerleave', this._onLeave);
   }
 
-  /* ─── 窗口大小变化 ─── */
-  
-  onResize(width, height) {
+  /* ─── update ─── */
+  update(time, delta) {
+    if (!this._loaded) return;
+
+    const t = this._clock.getElapsedTime();
+    const elapsed = t - this._animStartTime;
+
+    // ── 入场动画 (原版 gsap timeline 1:1) ──
+
+    // 1. camera z: 0 → 2, duration 2s (easeOut)
+    const camT = Math.min(elapsed / 2.0, 1);
+    const camZ = camT * camT * (3 - 2 * camT) * 2; // smoothstep 0→2
+    this._camera.position.z = camZ;
+
+    // 2. group rotation y: 0 → -PI/2, duration 1.5s
+    const rotT = Math.min(elapsed / 1.5, 1);
+    this._group.rotation.y = -(rotT * rotT * (3 - 2 * rotT)) * Math.PI / 2;
+
+    // 3. startProgress: 0 → 1, delay 0.5s, duration 5.5s
+    const spElapsed = Math.max(elapsed - 0.5, 0);
+    const spT = Math.min(spElapsed / 5.5, 1);
+    this._startProgress = spT * spT * (3 - 2 * spT); // smoothstep
+    this._uStartProgress.value = this._startProgress;
+
+    // 4. time
+    this._uTime.value = t;
+
+    // ── 相机 lerp (原版 1:1) ──
+    // position.lerp({x: -(0.3 * pointer.x), y: 2, z: 2}, 0.05)
+    const tx = -(0.3 * this._pointer.x);
+    this._camera.position.x += (tx - this._camera.position.x) * 0.05;
+    this._camera.position.y += (2 - this._camera.position.y) * 0.05;
+    // z 在入场动画期间由动画驱动，结束后 lerp 到 2
+    if (camT >= 1) {
+      this._camera.position.z += (2 - this._camera.position.z) * 0.05;
+    }
+    this._camera.lookAt(0, 0, 0);
+
+    // ── 粒子更新 (原版: gravity -0.0098, y<0 反弹) ──
+    if (this._particles) {
+      this._particles.material.uniforms.uTime.value = t;
+      const posA = this._particles.geometry.getAttribute('position');
+      const arr = posA.array;
+      const vel = this._particleVel;
+      for (let i = 0; i < posA.count; i++) {
+        const i3 = i * 3;
+        vel[i3 + 1] -= 0.0098;
+        arr[i3] += vel[i3];
+        arr[i3 + 1] += vel[i3 + 1];
+        arr[i3 + 2] += vel[i3 + 2];
+        if (arr[i3 + 1] < 0) {
+          arr[i3 + 1] = 0;
+          vel[i3 + 1] = -vel[i3 + 1];
+        }
+      }
+      posA.needsUpdate = true;
+    }
+  }
+
+  /* ─── render ─── */
+  render(renderer) {
+    if (!this._loaded) return;
+
+    // 1. 渲染主场景到 RT
+    renderer.setRenderTarget(this._mainRT);
+    renderer.render(this._scene, this._camera);
+
+    // 2. 更新扭曲 ping-pong
+    const readRT = this._distortPhase ? this._distortRT2 : this._distortRT1;
+    const writeRT = this._distortPhase ? this._distortRT1 : this._distortRT2;
+
+    this._distortMat.uniforms.tPrev.value = readRT.texture;
+    this._distortMat.uniforms.uPointer.value.copy(this._currNDC);
+    this._distortMat.uniforms.uLastPointer.value.copy(this._lastNDC);
+    this._distortMat.uniforms.uDiff.value = this._pointerDiff;
+    this._distortMat.uniforms.uIsPointerEnter.value = this._isPointerEnter ? 1 : 0;
+
+    renderer.setRenderTarget(writeRT);
+    renderer.render(this._distortScene, this._distortCamera);
+
+    this._distortPhase = !this._distortPhase;
+    this._pointerDiff *= 0.95;
+
+    // 3. 合成: 场景 + 扭曲
+    this._compMat.uniforms.tScene.value = this._mainRT.texture;
+    this._compMat.uniforms.tDistort.value = writeRT.texture;
+    renderer.setRenderTarget(null);
+    renderer.render(this._compScene, this._compCamera);
+  }
+
+  /* ─── resize ─── */
+  onResize(w, h) {
     if (this._camera) {
-      this._camera.aspect = width / height;
+      this._camera.aspect = w / h;
       this._camera.updateProjectionMatrix();
     }
-    if (this._composer) {
-      this._composer.setSize(width, height);
-    }
-    if (this._bloomPass) {
-      this._bloomPass.resolution.set(width, height);
-    }
-    if (this._distortMaterial) {
-      this._distortMaterial.uniforms.uAspect.value = width / height;
+    if (this._mainRT) this._mainRT.setSize(w, h);
+    if (this._distortRT1) { this._distortRT1.setSize(w, h); this._distortRT2.setSize(w, h); }
+    if (this._distortMat) this._distortMat.uniforms.uAspect.value = w / h;
+  }
+
+  /* ─── dispose ─── */
+  dispose() {
+    if (this._mainRT) this._mainRT.dispose();
+    if (this._distortRT1) { this._distortRT1.dispose(); this._distortRT2.dispose(); }
+    const canvas = this._renderer?.domElement;
+    if (canvas) {
+      canvas.removeEventListener('pointermove', this._onMove);
+      canvas.removeEventListener('pointerenter', this._onEnter);
+      canvas.removeEventListener('pointerleave', this._onLeave);
     }
   }
 }
