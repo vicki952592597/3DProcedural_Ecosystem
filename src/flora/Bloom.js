@@ -86,8 +86,10 @@ export class Bloom {
     const bgTex = new THREE.CanvasTexture(bgCanvas);
     this._scene.background = bgTex;
 
-    // 相机 — 原版: position=[0,2,2] zoom=2.5
-    this._camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
+    // 相机 — 原版 R3F: position=[0,2,2] zoom=2.5
+    // R3F 的 zoom 在 PerspectiveCamera 上等效缩小 fov
+    // 原版 fov=75 (R3F默认), zoom=2.5 → 等效 fov ≈ 75/2.5 = 30
+    this._camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
     this._camera.position.set(0, 2, 0); // 入场起始 z=0, 动画到 z=2
     this._camera.zoom = 2.5;
     this._camera.updateProjectionMatrix();
@@ -270,6 +272,49 @@ export class Bloom {
         // 5. rotate Y: mul(mul(PI, -0.3), startProgress) = PI * -0.3 * startProgress
         float yAngle = 3.14159 * -0.3 * uStartProgress;
         transformed = tslRotateY(transformed, yAngle);
+        `
+      );
+
+      // ─── 法线重算 (原版 finite difference 1:1) ───
+      // 原版 positionNode 中: pos2 = deform(pos + (0, 0.01, 0)), pos3 = deform(pos + (0.01, 0, 0))
+      // objectNormal = normalize(cross(normalize(pos2-pos), normalize(pos3-pos)))
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <defaultnormal_vertex>',
+        /* glsl */`
+        // ── Finite difference normal recalculation (原版 1:1) ──
+        float fd_iid = float(gl_InstanceID);
+        float fd_phaseOffset = fd_iid / 64.0 * 6.0;
+        float fd_nt = mod(uTime + fd_phaseOffset, 6.0) / 6.0;
+        float fd_bendStr = mix(1.0, -2.0, uStartProgress);
+        float fd_curv = mix(6.28318, fd_bendStr * 3.14159, fd_nt);
+        vec3 fd_sf = mix(vec3(0.8, 0.01, 0.3), vec3(0.8, 0.7, 0.4), uStartProgress);
+        float fd_bloomS = clamp(fd_nt / 0.5, 0.0, 1.0);
+        float fd_shrinkT = clamp((fd_nt - 0.5) / 0.5, 0.0, 1.0);
+        float fd_shrinkS = mix(0.8, 0.2, fd_shrinkT);
+        float fd_yAngle = 3.14159 * -0.3 * uStartProgress;
+
+        // 原版: shift = vec2(0.01, 0), pos2 = deform(pos + shift.yyx), pos3 = deform(pos + shift.xyy)
+        vec3 fd_shift_yyx = vec3(0.0, 0.0, 0.01); // shift.yyx = (0, 0, 0.01)
+        vec3 fd_shift_xyy = vec3(0.01, 0.0, 0.0); // shift.xyy = (0.01, 0, 0)
+
+        vec3 fd_pos2 = position + fd_shift_yyx;
+        fd_pos2 = tslScale(fd_pos2, fd_sf);
+        fd_pos2 = tslBend(fd_pos2, fd_curv, vec3(0.0));
+        fd_pos2 = tslScale(fd_pos2, vec3(fd_bloomS));
+        fd_pos2 = tslScale(fd_pos2, vec3(fd_shrinkS));
+        fd_pos2 = tslRotateY(fd_pos2, fd_yAngle);
+
+        vec3 fd_pos3 = position + fd_shift_xyy;
+        fd_pos3 = tslScale(fd_pos3, fd_sf);
+        fd_pos3 = tslBend(fd_pos3, fd_curv, vec3(0.0));
+        fd_pos3 = tslScale(fd_pos3, vec3(fd_bloomS));
+        fd_pos3 = tslScale(fd_pos3, vec3(fd_shrinkS));
+        fd_pos3 = tslRotateY(fd_pos3, fd_yAngle);
+
+        vec3 fd_objectNormal = normalize(cross(normalize(fd_pos2 - transformed), normalize(fd_pos3 - transformed)));
+        objectNormal = fd_objectNormal;
+
+        #include <defaultnormal_vertex>
         `
       );
 
