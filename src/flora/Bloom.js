@@ -304,8 +304,52 @@ export class Bloom {
         `
       );
 
-      // 不做 finite difference 法线重算 — 让 Three.js 用 normalMatrix 自动变换
-      // 避免人工计算带来的过强对比度
+      // 法线跟随顶点变形 — 在 defaultnormal_vertex 之前变换 objectNormal
+      // 只做旋转变换（不含缩放），避免对比度过强
+      shader.vertexShader = shader.vertexShader.replace(
+        '#include <defaultnormal_vertex>',
+        /* glsl */`
+        {
+          // 对法线只应用 bend 的旋转部分和 rotateY
+          float fn_po = float(gl_InstanceID) / 64.0 * uCycleDuration;
+          float fn_nt = mod(uTime + fn_po, uCycleDuration) / uCycleDuration;
+          float fn_bs = mix(uBendMin, uBendMax, uStartProgress);
+          float fn_cv = mix(6.28318, fn_bs * 3.14159, fn_nt);
+          float fn_ya = 3.14159 * -0.3 * uStartProgress;
+
+          // Bend 对法线的影响：只取旋转部分
+          // axis=2 bend: angle = nx * factor
+          vec3 n = objectNormal;
+          float bendAngle = n.x * fn_cv * 0.3; // 柔和系数，减轻法线弯曲
+          float bc = cos(bendAngle), bs2 = sin(bendAngle);
+          n = vec3(
+            n.x * bc - n.y * bs2,
+            n.x * bs2 + n.y * bc,
+            n.z
+          );
+
+          // RotateY
+          float yc = cos(fn_ya), ys = sin(fn_ya);
+          objectNormal = vec3(
+            n.x * yc + n.z * ys,
+            n.y,
+            -n.x * ys + n.z * yc
+          );
+        }
+        #include <defaultnormal_vertex>
+        `
+      );
+
+      // 背面法线翻转 — 让双面都能接收环境光
+      shader.fragmentShader = shader.fragmentShader.replace(
+        '#include <normal_fragment_begin>',
+        /* glsl */`
+        #include <normal_fragment_begin>
+        if (!gl_FrontFacing) {
+          normal = -normal;
+        }
+        `
+      );
 
       // ─── 片元 Shader 注入 ───
       // 原版 colorNode: mix(0, texture(map), clamp(0, 1, startProgress*2))
