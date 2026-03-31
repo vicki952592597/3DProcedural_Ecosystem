@@ -3,7 +3,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
-import { UniformsManager, GarbageCollector, BionicButterfly, MandelbulbFractal, AuroraBorealis, TroisFlower, Dahlia, Tulip, VantaHalo, VantaFog, VantaCells, VantaClouds, VantaRipple, VantaBirds, VantaNet, VantaWaves, VantaDots, VantaRings, VantaGlobe, VantaClouds2, VantaTopology, VantaTrunk } from './src/index.js';
+import { UniformsManager, GarbageCollector, BionicButterfly, MandelbulbFractal, AuroraBorealis, TroisFlower, Dahlia, Tulip, Bloom, VantaHalo, VantaFog, VantaCells, VantaClouds, VantaRipple, VantaBirds, VantaNet, VantaWaves, VantaDots, VantaRings, VantaGlobe, VantaClouds2, VantaTopology, VantaTrunk } from './src/index.js';
 
 // ── 场景配置元数据 ──
 const SC = {
@@ -57,6 +57,17 @@ const SC = {
       {s:'💓 动画'},{k:'bloomWaveAmp',l:'波浪幅度',mn:0,mx:0.4,st:0.01},{k:'cycleDuration',l:'周期(秒)',mn:2,mx:12,st:0.5},{k:'breatheAmp',l:'呼吸幅度',mn:0,mx:0.02,st:0.001},
       {s:'✨ 光效'},{k:'energyWaveSpeed',l:'能量波速',mn:0.1,mx:1.5,st:0.05},{k:'energyWaveStrength',l:'能量波强度',mn:0,mx:0.5,st:0.01},{k:'fresnelStrength',l:'菲涅尔',mn:0,mx:1,st:0.02},{k:'coreGlow',l:'花心辉光',mn:0,mx:1.5,st:0.05},{k:'specularStr',l:'高光',mn:0,mx:0.5,st:0.01},{k:'sssStrength',l:'SSS 强度',mn:0,mx:1,st:0.02},
       {s:'📷 交互'},{k:'autoRotateSpeed',l:'自转速度',mn:0,mx:0.1,st:0.005}
+    ],
+    pal:[]
+  },
+  bloom: {
+    title:'Bloom 绽放', desc:'Deadrabbit 花朵绽放 1:1 复刻 · 128 花瓣 InstancedMesh + HDR 环境光 + 鼠标交互扭曲 + Bloom 辉光',
+    tags:[['InstancedMesh','green'],['HDR Env','purple'],['Distortion','pink']],
+    cam:null, look:null,
+    defs:{ bloomStrength:0.8, bloomRadius:0.5, bloomThreshold:0.3, distortStrength:0.05 },
+    sl:[
+      {s:'✨ 辉光'},{k:'bloomStrength',l:'辉光强度',mn:0,mx:3,st:0.05},{k:'bloomRadius',l:'辉光半径',mn:0,mx:2,st:0.05},{k:'bloomThreshold',l:'辉光阈值',mn:0,mx:1,st:0.05},
+      {s:'🌀 扭曲'},{k:'distortStrength',l:'扭曲强度',mn:0,mx:0.2,st:0.005}
     ],
     pal:[]
   },
@@ -341,6 +352,15 @@ function build(mode,params){
       scene.remove(defaultAmbient, dL, pL);
       scene.background=null;
       break;
+    case 'bloom':
+      currentEntity = new Bloom();
+      currentEntity.init(scene, renderer).then(() => {
+        // Bloom 自带相机、场景、后处理
+        if(currentEntity._camera){ activeCamera=currentEntity._camera; useVantaCamera=true; controls.enabled=false; }
+        scene.remove(defaultAmbient, dL, pL);
+        scene.background=null;
+      });
+      break;
     case 'tulip':
       currentEntity=new Tulip(params).build(); currentEntity.addTo(scene);
       // Tulip 自带相机、灯光和背景
@@ -621,11 +641,14 @@ function animate(){
   requestAnimationFrame(animate); const dt=clock.getDelta();
   uniformsMgr.tick();
   // 每帧更新：TroisFlower / Vanta / Flock
-  if(currentEntity&&currentEntity.update) currentEntity.update();
+  if(currentEntity&&currentEntity.update) currentEntity.update(undefined, dt);
   if(currentMode==='flock'&&currentEntity)currentEntity.updateFlock(dt);
   if(controls.enabled) controls.update();
   // 根据模式选择渲染管线 + 激活相机
-  if(useBloom){ 
+  if(currentMode==='bloom' && currentEntity && currentEntity._loaded) {
+    // Bloom 自带完整渲染管线 (scene + camera + composer)
+    currentEntity.render(renderer);
+  } else if(useBloom){ 
     // Bloom 模式下需要更新 RenderPass 的相机
     composer.passes[0].camera = activeCamera;
     composer.render(); 
@@ -647,6 +670,8 @@ window.addEventListener('resize',()=>{
   uniformsMgr.set('uResolution',new THREE.Vector2(w,h));
   // Vanta 效果尺寸同步
   if(currentEntity&&currentEntity.resize) currentEntity.resize(w,h);
+  // Bloom 效果尺寸同步
+  if(currentEntity&&currentEntity.onResize) currentEntity.onResize(w,h);
 });
 
 // ── 鼠标交互（Vanta 效果需要 iMouse + 3D 效果鼠标跟随） ──

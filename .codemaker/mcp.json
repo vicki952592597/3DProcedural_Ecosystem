@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "dashen-spec": {
+      "command": "node",
+      "args": ["C:\\Users\\N13524\\.dashen-spec-mcp\\server.js"],
+      "env": {
+        "FEISHU_APP_ID": "cli_a94fb09ee9b81bb5",
+        "FEISHU_APP_SECRET": "YFlc8uz57BDYlwpJxIEbxg5wRQR1cyux",
+        "FEISHU_DOC_ID": "QRhbdLIwVouh6oxWaGWcHShkn7e",
+        "CACHE_TTL": "300"
+      }
+    }
+  }
+}

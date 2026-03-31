@@ -22,6 +22,7 @@ export { BionicFlower } from './flora/BionicFlower.js';
 export { TroisFlower } from './flora/TroisFlower.js';
 export { Dahlia } from './flora/Dahlia.js';
 export { Tulip } from './flora/Tulip.js';
+export { Bloom } from './flora/Bloom.js';
 
 // === Fauna 仿生动力系 ===
 export { VertexKinematics } from './fauna/VertexKinematics.js';
