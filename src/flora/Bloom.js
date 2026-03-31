@@ -188,11 +188,11 @@ export class Bloom {
       map: srcMat.map,
       normalMap: srcMat.normalMap,
       emissiveMap: srcMat.emissiveMap,
-      emissive: new THREE.Color(1, 1, 1),  // 启用 emissiveMap（白色 × emissiveMap）
-      emissiveIntensity: 0.4,              // 柔和自发光，不过曝
-      roughness: 0.45,                     // 半光滑，柔和高光
-      metalness: 0.0,                      // 非金属
-      envMapIntensity: 1.2,                // HDR 反射适度增强
+      emissive: new THREE.Color(1, 1, 1),  // 启用 emissiveMap
+      emissiveIntensity: 0.5,              // 自发光让暗部通透
+      roughness: 0.6,                      // 柔和漫反射，减少高光对比
+      metalness: 0.0,
+      envMapIntensity: 1.0,
       normalScale: new THREE.Vector2(1.0, 1.0),
     });
 
@@ -304,41 +304,8 @@ export class Bloom {
         `
       );
 
-      // ─── 法线重算 (原版 finite difference 1:1) ───
-      // 安全注入点: 在 project_vertex 之前覆盖 vNormal
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <project_vertex>',
-        /* glsl */`
-        {
-          float fd_po = float(gl_InstanceID) / 64.0 * uCycleDuration;
-          float fd_nt = mod(uTime + fd_po, uCycleDuration) / uCycleDuration;
-          float fd_bs = mix(uBendMin, uBendMax, uStartProgress);
-          float fd_cv = mix(6.28318, fd_bs * 3.14159, fd_nt);
-          vec3 fd_sf = mix(vec3(0.8, uScaleMinY, uScaleMinZ), vec3(0.8, uScaleMaxY, uScaleMaxZ), uStartProgress);
-          float fd_bl = clamp(fd_nt / 0.5, 0.0, 1.0);
-          float fd_sh = mix(0.8, 0.2, clamp((fd_nt - 0.5) / 0.5, 0.0, 1.0));
-          float fd_ya = 3.14159 * -0.3 * uStartProgress;
-
-          vec3 fd_p2 = position + vec3(0.0, 0.0, 0.01);
-          fd_p2 = tslScale(fd_p2, fd_sf);
-          fd_p2 = tslBend(fd_p2, fd_cv, vec3(0.0));
-          fd_p2 = tslScale(fd_p2, vec3(fd_bl));
-          fd_p2 = tslScale(fd_p2, vec3(fd_sh));
-          fd_p2 = tslRotateY(fd_p2, fd_ya);
-
-          vec3 fd_p3 = position + vec3(0.01, 0.0, 0.0);
-          fd_p3 = tslScale(fd_p3, fd_sf);
-          fd_p3 = tslBend(fd_p3, fd_cv, vec3(0.0));
-          fd_p3 = tslScale(fd_p3, vec3(fd_bl));
-          fd_p3 = tslScale(fd_p3, vec3(fd_sh));
-          fd_p3 = tslRotateY(fd_p3, fd_ya);
-
-          vec3 fd_n = normalize(cross(normalize(fd_p3 - transformed), normalize(fd_p2 - transformed)));
-          vNormal = normalize(normalMatrix * fd_n);
-        }
-        #include <project_vertex>
-        `
-      );
+      // 不做 finite difference 法线重算 — 让 Three.js 用 normalMatrix 自动变换
+      // 避免人工计算带来的过强对比度
 
       // ─── 片元 Shader 注入 ───
       // 原版 colorNode: mix(0, texture(map), clamp(0, 1, startProgress*2))
@@ -351,16 +318,8 @@ export class Bloom {
         uniform float uStartProgressF;
         `
       );
-      // 法线处理 — 原版关键: frontFacing时取abs让背面也有正确光照
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <normal_fragment_begin>',
-        /* glsl */`
-        #include <normal_fragment_begin>
-        if (gl_FrontFacing) {
-          normal = abs(normal);
-        }
-        `
-      );
+      // 法线处理 — DoubleSide 时确保背面法线翻转
+      // 不做 abs()，避免不自然的对比度
       // 颜色淡入
       shader.fragmentShader = shader.fragmentShader.replace(
         '#include <color_fragment>',
