@@ -84,20 +84,12 @@ export class Bloom {
   async init(parentScene, renderer) {
     this._renderer = renderer;
 
-    // 场景 — 无 scene.background (原版用 CSS 渐变)
+    // 场景 — 原版: Canvas 透明, CSS 渐变在 HTML 层
     this._scene = new THREE.Scene();
+    // scene.background = null → 透明 Canvas，露出下面的 CSS 渐变
 
-    // 渐变背景 (模拟 CSS from-black to-#8386ff)
-    const bgCanvas = document.createElement('canvas');
-    bgCanvas.width = 2; bgCanvas.height = 512;
-    const bgCtx = bgCanvas.getContext('2d');
-    const grad = bgCtx.createLinearGradient(0, 0, 0, 512);
-    grad.addColorStop(0, '#000000');
-    grad.addColorStop(1, '#8386ff');
-    bgCtx.fillStyle = grad;
-    bgCtx.fillRect(0, 0, 2, 512);
-    const bgTex = new THREE.CanvasTexture(bgCanvas);
-    this._scene.background = bgTex;
+    // 创建 CSS 渐变背景 + 星光层（原版: from-black to-#8386ff + 粒子星光）
+    this._createHTMLBackground(renderer);
 
     // 相机 — 原版 R3F: position=[0,2,2] zoom=2.5
     // R3F 的 zoom 在 PerspectiveCamera 上等效缩小 fov
@@ -508,6 +500,7 @@ export class Bloom {
     const w = window.innerWidth, h = window.innerHeight;
     this._mainRT = new THREE.WebGLRenderTarget(w, h, {
       minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter,
+      format: THREE.RGBAFormat,
     });
 
     this._compScene = new THREE.Scene();
@@ -535,6 +528,7 @@ export class Bloom {
           gl_FragColor = texture2D(tScene, uv);
         }
       `,
+      transparent: true,
     });
 
     const quad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), this._compMat);
@@ -564,6 +558,70 @@ export class Bloom {
     // 原版: setIsPointerEnter 始终为 true
     this._isPointerEnter = true;
     canvas.addEventListener('pointermove', this._onMove);
+  }
+
+  /* ─── HTML 背景 + 星光 (原版 CSS 层) ─── */
+  _createHTMLBackground(renderer) {
+    const canvas = renderer.domElement;
+    const parent = canvas.parentElement;
+
+    // 确保 canvas 透明
+    renderer.setClearColor(0x000000, 0);
+
+    // 渐变背景层
+    this._bgDiv = document.createElement('div');
+    this._bgDiv.id = 'bloom-bg';
+    this._bgDiv.style.cssText = `
+      position:absolute; inset:0; z-index:-2;
+      background:linear-gradient(to bottom, #000000, #8386ff);
+      pointer-events:none;
+    `;
+    parent.style.position = 'relative';
+    parent.insertBefore(this._bgDiv, canvas);
+
+    // 星光层
+    this._starsDiv = document.createElement('div');
+    this._starsDiv.id = 'bloom-stars';
+    this._starsDiv.style.cssText = `
+      position:absolute; inset:0; z-index:-1;
+      pointer-events:none; overflow:hidden;
+    `;
+    parent.insertBefore(this._starsDiv, canvas);
+
+    // 生成星光粒子 (CSS)
+    const starCount = 120;
+    for (let i = 0; i < starCount; i++) {
+      const star = document.createElement('div');
+      const size = Math.random() * 2.5 + 0.5;
+      const x = Math.random() * 100;
+      const y = Math.random() * 100;
+      const delay = Math.random() * 5;
+      const duration = 2 + Math.random() * 4;
+      const opacity = 0.2 + Math.random() * 0.6;
+      star.style.cssText = `
+        position:absolute;
+        left:${x}%; top:${y}%;
+        width:${size}px; height:${size}px;
+        border-radius:50%;
+        background:white;
+        opacity:${opacity};
+        animation:bloom-twinkle ${duration}s ${delay}s ease-in-out infinite;
+      `;
+      this._starsDiv.appendChild(star);
+    }
+
+    // 注入动画 keyframe
+    if (!document.getElementById('bloom-star-style')) {
+      const style = document.createElement('style');
+      style.id = 'bloom-star-style';
+      style.textContent = `
+        @keyframes bloom-twinkle {
+          0%, 100% { opacity: 0.1; transform: scale(0.8); }
+          50% { opacity: 0.9; transform: scale(1.2); }
+        }
+      `;
+      document.head.appendChild(style);
+    }
   }
 
   /* ─── update ─── */
@@ -629,8 +687,10 @@ export class Bloom {
   render(renderer) {
     if (!this._loaded) return;
 
-    // 1. 渲染主场景到 RT
+    // 1. 渲染主场景到 RT (透明背景)
     renderer.setRenderTarget(this._mainRT);
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear();
     renderer.render(this._scene, this._camera);
 
     // 2. 更新扭曲 ping-pong
@@ -649,10 +709,12 @@ export class Bloom {
     this._distortPhase = !this._distortPhase;
     this._pointerDiff *= 0.95;
 
-    // 3. 合成: 场景 + 扭曲
+    // 3. 合成: 场景 + 扭曲 → 透明输出到屏幕
     this._compMat.uniforms.tScene.value = this._mainRT.texture;
     this._compMat.uniforms.tDistort.value = writeRT.texture;
     renderer.setRenderTarget(null);
+    renderer.setClearColor(0x000000, 0);
+    renderer.clear();
     renderer.render(this._compScene, this._compCamera);
   }
 
@@ -771,22 +833,13 @@ export class Bloom {
     }
   }
 
-  /* ─── 更新渐变背景 ─── */
+  /* ─── 更新渐变背景 (CSS层) ─── */
   _updateBackground(top, bot) {
-    if (!this._scene) return;
     this._bgTop = top || this._bgTop || '#000000';
     this._bgBot = bot || this._bgBot || '#8386ff';
-    const canvas = document.createElement('canvas');
-    canvas.width = 2; canvas.height = 512;
-    const ctx = canvas.getContext('2d');
-    const grad = ctx.createLinearGradient(0, 0, 0, 512);
-    grad.addColorStop(0, this._bgTop);
-    grad.addColorStop(1, this._bgBot);
-    ctx.fillStyle = grad;
-    ctx.fillRect(0, 0, 2, 512);
-    const tex = new THREE.CanvasTexture(canvas);
-    if (this._scene.background && this._scene.background.dispose) this._scene.background.dispose();
-    this._scene.background = tex;
+    if (this._bgDiv) {
+      this._bgDiv.style.background = `linear-gradient(to bottom, ${this._bgTop}, ${this._bgBot})`;
+    }
   }
 
   /* ─── dispose ─── */
@@ -797,5 +850,10 @@ export class Bloom {
     if (canvas) {
       canvas.removeEventListener('pointermove', this._onMove);
     }
+    // 清理 HTML 背景和星光层
+    if (this._bgDiv && this._bgDiv.parentElement) this._bgDiv.parentElement.removeChild(this._bgDiv);
+    if (this._starsDiv && this._starsDiv.parentElement) this._starsDiv.parentElement.removeChild(this._starsDiv);
+    // 恢复 renderer 清除色
+    if (this._renderer) this._renderer.setClearColor(0x000000, 1);
   }
 }
