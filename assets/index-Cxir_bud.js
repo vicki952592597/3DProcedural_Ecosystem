@@ -4383,6 +4383,40 @@ void main() {
         // 5. rotate Y: mul(mul(PI, -0.3), startProgress) = PI * -0.3 * startProgress
         float yAngle = 3.14159 * -0.3 * uStartProgress;
         transformed = tslRotateY(transformed, yAngle);
+        `),c.vertexShader=c.vertexShader.replace("#include <defaultnormal_vertex>",`
+        {
+          // 对法线只应用 bend 的旋转部分和 rotateY
+          float fn_po = float(gl_InstanceID) / 64.0 * uCycleDuration;
+          float fn_nt = mod(uTime + fn_po, uCycleDuration) / uCycleDuration;
+          float fn_bs = mix(uBendMin, uBendMax, uStartProgress);
+          float fn_cv = mix(6.28318, fn_bs * 3.14159, fn_nt);
+          float fn_ya = 3.14159 * -0.3 * uStartProgress;
+
+          // Bend 对法线的影响：只取旋转部分
+          // axis=2 bend: angle = nx * factor
+          vec3 n = objectNormal;
+          float bendAngle = n.x * fn_cv * 0.3; // 柔和系数，减轻法线弯曲
+          float bc = cos(bendAngle), bs2 = sin(bendAngle);
+          n = vec3(
+            n.x * bc - n.y * bs2,
+            n.x * bs2 + n.y * bc,
+            n.z
+          );
+
+          // RotateY
+          float yc = cos(fn_ya), ys = sin(fn_ya);
+          objectNormal = vec3(
+            n.x * yc + n.z * ys,
+            n.y,
+            -n.x * ys + n.z * yc
+          );
+        }
+        #include <defaultnormal_vertex>
+        `),c.fragmentShader=c.fragmentShader.replace("#include <normal_fragment_begin>",`
+        #include <normal_fragment_begin>
+        if (!gl_FrontFacing) {
+          normal = -normal;
+        }
         `),c.uniforms.uStartProgressF=r,c.fragmentShader=c.fragmentShader.replace("#include <common>",`
         #include <common>
         uniform float uStartProgressF;
