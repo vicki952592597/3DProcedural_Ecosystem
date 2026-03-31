@@ -61,6 +61,19 @@ export class Bloom {
     // 花瓣 shader uniforms
     this._uStartProgress = { value: 0 };
     this._uTime = { value: 0 };
+    // 可控 uniforms
+    this._uCycleDuration = { value: 6 };
+    this._uScaleMinY = { value: 0.01 };
+    this._uScaleMaxY = { value: 0.7 };
+    this._uScaleMinZ = { value: 0.3 };
+    this._uScaleMaxZ = { value: 0.4 };
+    this._uBendMin = { value: 1 };
+    this._uBendMax = { value: -2 };
+    // 运行时参数
+    this._params = {
+      particleGravity: 0.0098,
+      distortStrength: 0.05,
+    };
   }
 
   getCamera() { return this._camera; }
@@ -189,6 +202,13 @@ export class Bloom {
     mat.onBeforeCompile = (shader) => {
       shader.uniforms.uStartProgress = uStartProgress;
       shader.uniforms.uTime = uTime;
+      shader.uniforms.uCycleDuration = this._uCycleDuration;
+      shader.uniforms.uScaleMinY = this._uScaleMinY;
+      shader.uniforms.uScaleMaxY = this._uScaleMaxY;
+      shader.uniforms.uScaleMinZ = this._uScaleMinZ;
+      shader.uniforms.uScaleMaxZ = this._uScaleMaxZ;
+      shader.uniforms.uBendMin = this._uBendMin;
+      shader.uniforms.uBendMax = this._uBendMax;
 
       // ─── 顶点 Shader 注入 ───
       // 原版 TSL 逻辑 1:1 翻译:
@@ -203,6 +223,13 @@ export class Bloom {
         #include <common>
         uniform float uStartProgress;
         uniform float uTime;
+        uniform float uCycleDuration;
+        uniform float uScaleMinY;
+        uniform float uScaleMaxY;
+        uniform float uScaleMinZ;
+        uniform float uScaleMaxZ;
+        uniform float uBendMin;
+        uniform float uBendMax;
 
         vec3 tslScale(vec3 p, vec3 s) {
           return vec3(p.x*s.x, p.y*s.y, p.z*s.z);
@@ -244,19 +271,17 @@ export class Bloom {
         /* glsl */`
         #include <begin_vertex>
 
-        // 原版 1:1: instanceID / 64 * 6
+        // instanceID / 64 * cycleDuration
         float iid = float(gl_InstanceID);
-        float phaseOffset = iid / 64.0 * 6.0;
-        // mod(time + phaseOffset, 6) / 6
-        float nt = mod(uTime + phaseOffset, 6.0) / 6.0;
+        float phaseOffset = iid / 64.0 * uCycleDuration;
+        float nt = mod(uTime + phaseOffset, uCycleDuration) / uCycleDuration;
 
-        // mix(startProgress, 0, 1, 1, -2) → bendStrength
-        float bendStr = mix(1.0, -2.0, uStartProgress);
-        // mix(nt, 0, 1, PI*2, bendStr*PI)
+        // bendStrength = mix(startProgress, 0, 1, bendMin, bendMax)
+        float bendStr = mix(uBendMin, uBendMax, uStartProgress);
         float curv = mix(6.28318, bendStr * 3.14159, nt);
 
-        // scaleFactor = mix(startProgress, 0, 1, (0.8,0.01,0.3), (0.8,0.7,0.4))
-        vec3 sf = mix(vec3(0.8, 0.01, 0.3), vec3(0.8, 0.7, 0.4), uStartProgress);
+        // scaleFactor (controllable Y and Z, X fixed at 0.8)
+        vec3 sf = mix(vec3(0.8, uScaleMinY, uScaleMinZ), vec3(0.8, uScaleMaxY, uScaleMaxZ), uStartProgress);
 
         // 1. scale by startProgress-dependent factor
         transformed = tslScale(transformed, sf);
@@ -281,11 +306,11 @@ export class Bloom {
         '#include <project_vertex>',
         /* glsl */`
         {
-          float fd_po = float(gl_InstanceID) / 64.0 * 6.0;
-          float fd_nt = mod(uTime + fd_po, 6.0) / 6.0;
-          float fd_bs = mix(1.0, -2.0, uStartProgress);
+          float fd_po = float(gl_InstanceID) / 64.0 * uCycleDuration;
+          float fd_nt = mod(uTime + fd_po, uCycleDuration) / uCycleDuration;
+          float fd_bs = mix(uBendMin, uBendMax, uStartProgress);
           float fd_cv = mix(6.28318, fd_bs * 3.14159, fd_nt);
-          vec3 fd_sf = mix(vec3(0.8, 0.01, 0.3), vec3(0.8, 0.7, 0.4), uStartProgress);
+          vec3 fd_sf = mix(vec3(0.8, uScaleMinY, uScaleMinZ), vec3(0.8, uScaleMaxY, uScaleMaxZ), uStartProgress);
           float fd_bl = clamp(fd_nt / 0.5, 0.0, 1.0);
           float fd_sh = mix(0.8, 0.2, clamp((fd_nt - 0.5) / 0.5, 0.0, 1.0));
           float fd_ya = 3.14159 * -0.3 * uStartProgress;
@@ -304,7 +329,7 @@ export class Bloom {
           fd_p3 = tslScale(fd_p3, vec3(fd_sh));
           fd_p3 = tslRotateY(fd_p3, fd_ya);
 
-          vec3 fd_n = normalize(cross(normalize(fd_p2 - transformed), normalize(fd_p3 - transformed)));
+          vec3 fd_n = normalize(cross(normalize(fd_p3 - transformed), normalize(fd_p2 - transformed)));
           vNormal = normalize(normalMatrix * fd_n);
         }
         #include <project_vertex>
@@ -493,6 +518,7 @@ export class Bloom {
       uniforms: {
         tScene: { value: null },
         tDistort: { value: null },
+        uDistortStrength: { value: 0.05 },
       },
       vertexShader: /* glsl */`
         varying vec2 vUv;
@@ -501,11 +527,11 @@ export class Bloom {
       fragmentShader: /* glsl */`
         uniform sampler2D tScene;
         uniform sampler2D tDistort;
+        uniform float uDistortStrength;
         varying vec2 vUv;
         void main() {
           vec4 d = texture2D(tDistort, vUv);
-          // 原版 WebGPU 用 flipY，WebGL RT 不需要翻转
-          vec2 uv = vec2(vUv.x + d.r * 0.05, vUv.y);
+          vec2 uv = vec2(vUv.x + d.r * uDistortStrength, vUv.y);
           gl_FragColor = texture2D(tScene, uv);
         }
       `,
@@ -586,7 +612,7 @@ export class Bloom {
       const vel = this._particleVel;
       for (let i = 0; i < posA.count; i++) {
         const i3 = i * 3;
-        vel[i3 + 1] -= 0.0098;
+        vel[i3 + 1] -= this._params.particleGravity;
         arr[i3] += vel[i3];
         arr[i3 + 1] += vel[i3 + 1];
         arr[i3 + 2] += vel[i3 + 2];
@@ -639,6 +665,128 @@ export class Bloom {
     if (this._mainRT) this._mainRT.setSize(w, h);
     if (this._distortRT1) { this._distortRT1.setSize(w, h); this._distortRT2.setSize(w, h); }
     if (this._distortMat) this._distortMat.uniforms.uAspect.value = w / h;
+  }
+
+  /* ─── applyParam — 控制面板实时参数调整 ─── */
+  applyParam(key, value) {
+    switch (key) {
+      // ── 相机 ──
+      case 'cameraZoom':
+        if (this._camera) { this._camera.zoom = value; this._camera.updateProjectionMatrix(); }
+        break;
+      case 'cameraFov':
+        if (this._camera) { this._camera.fov = value; this._camera.updateProjectionMatrix(); }
+        break;
+
+      // ── 花瓣动画 ──
+      case 'startProgress':
+        this._uStartProgress.value = value;
+        this._startProgress = value;
+        break;
+      case 'cycleDuration':
+        this._uCycleDuration.value = value;
+        break;
+      case 'petalRotStep':
+        if (this._petalMesh) {
+          const dummy = new THREE.Object3D();
+          for (let i = 0; i < 128; i++) {
+            dummy.rotation.set(0, THREE.MathUtils.degToRad(value * i), 0);
+            dummy.updateMatrix();
+            this._petalMesh.setMatrixAt(i, dummy.matrix);
+          }
+          this._petalMesh.instanceMatrix.needsUpdate = true;
+        }
+        break;
+
+      // ── 花瓣形态 ──
+      case 'scaleMinY': this._uScaleMinY.value = value; break;
+      case 'scaleMaxY': this._uScaleMaxY.value = value; break;
+      case 'scaleMinZ': this._uScaleMinZ.value = value; break;
+      case 'scaleMaxZ': this._uScaleMaxZ.value = value; break;
+
+      // ── 弯曲 ──
+      case 'bendMin': this._uBendMin.value = value; break;
+      case 'bendMax': this._uBendMax.value = value; break;
+
+      // ── 环境光 ──
+      case 'envIntensity':
+        if (this._scene) this._scene.environmentIntensity = value;
+        break;
+      case 'envRotation':
+        if (this._scene) this._scene.environmentRotation = new THREE.Euler(0, value, 0);
+        break;
+
+      // ── 鼠标扭曲 ──
+      case 'distortStrength':
+        this._params.distortStrength = value;
+        if (this._compMat) this._compMat.uniforms.uDistortStrength.value = value;
+        break;
+      case 'distortBrush':
+        if (this._distortMat) this._distortMat.uniforms.uBrushSize.value = value;
+        break;
+      case 'distortFade':
+        if (this._distortMat) this._distortMat.uniforms.uFadingRate.value = value;
+        break;
+
+      // ── 粒子 ──
+      case 'particleSize':
+        if (this._particles) this._particles.material.uniforms.uSize = { value: value };
+        break;
+      case 'particleGravity':
+        this._params.particleGravity = value;
+        break;
+      case 'particleSpread':
+        // 重新生成粒子位置
+        if (this._particles) {
+          const posA = this._particles.geometry.getAttribute('position');
+          for (let i = 0; i < posA.count; i++) {
+            posA.array[i * 3] = (Math.random() - 0.5) * value;
+            posA.array[i * 3 + 1] = (Math.random() - 0.5) * value;
+            posA.array[i * 3 + 2] = (Math.random() - 0.5) * value;
+          }
+          posA.needsUpdate = true;
+        }
+        break;
+
+      // ── 花茎 ──
+      case 'stemRoughness':
+        if (this._stemMesh) {
+          this._stemMesh.traverse(c => {
+            if (c.isMesh && c.material) c.material.roughness = value;
+          });
+        }
+        break;
+      case 'stemPosY':
+        if (this._stemMesh) this._stemMesh.position.y = value;
+        break;
+
+      // ── 背景颜色 ──
+      case 'bgColorTop':
+      case 'bgColorBot':
+        this._updateBackground(
+          key === 'bgColorTop' ? value : null,
+          key === 'bgColorBot' ? value : null
+        );
+        break;
+    }
+  }
+
+  /* ─── 更新渐变背景 ─── */
+  _updateBackground(top, bot) {
+    if (!this._scene) return;
+    this._bgTop = top || this._bgTop || '#000000';
+    this._bgBot = bot || this._bgBot || '#8386ff';
+    const canvas = document.createElement('canvas');
+    canvas.width = 2; canvas.height = 512;
+    const ctx = canvas.getContext('2d');
+    const grad = ctx.createLinearGradient(0, 0, 0, 512);
+    grad.addColorStop(0, this._bgTop);
+    grad.addColorStop(1, this._bgBot);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 2, 512);
+    const tex = new THREE.CanvasTexture(canvas);
+    if (this._scene.background && this._scene.background.dispose) this._scene.background.dispose();
+    this._scene.background = tex;
   }
 
   /* ─── dispose ─── */

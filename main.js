@@ -61,15 +61,30 @@ const SC = {
     pal:[]
   },
   bloom: {
-    title:'Bloom 绽放', desc:'Deadrabbit 花朵绽放 1:1 复刻 · 128 花瓣 InstancedMesh + HDR 环境光 + 鼠标交互扭曲 + Bloom 辉光',
+    title:'Bloom 绽放', desc:'Deadrabbit 花朵绽放 1:1 复刻 · 128 花瓣 InstancedMesh + HDR 环境光 + 鼠标交互扭曲',
     tags:[['InstancedMesh','green'],['HDR Env','purple'],['Distortion','pink']],
     cam:null, look:null,
-    defs:{ bloomStrength:0.8, bloomRadius:0.5, bloomThreshold:0.3, distortStrength:0.05 },
+    defs:{
+      envIntensity:0.5, envRotation:-2.094, cameraZoom:2.5, cameraFov:75,
+      startProgress:1, cycleDuration:6, petalRotStep:140,
+      scaleMinY:0.01, scaleMaxY:0.7, scaleMinZ:0.3, scaleMaxZ:0.4,
+      bendMin:1, bendMax:-2,
+      distortStrength:0.05, distortBrush:0.08, distortFade:0.9,
+      particleSize:0.01, particleGravity:0.0098, particleSpread:20,
+      stemRoughness:0.5, stemPosY:-3.3,
+      bgColorTop:'#000000', bgColorBot:'#8386ff'
+    },
     sl:[
-      {s:'✨ 辉光'},{k:'bloomStrength',l:'辉光强度',mn:0,mx:3,st:0.05},{k:'bloomRadius',l:'辉光半径',mn:0,mx:2,st:0.05},{k:'bloomThreshold',l:'辉光阈值',mn:0,mx:1,st:0.05},
-      {s:'🌀 扭曲'},{k:'distortStrength',l:'扭曲强度',mn:0,mx:0.2,st:0.005}
+      {s:'📷 相机'},{k:'cameraZoom',l:'缩放',mn:0.5,mx:5,st:0.1},{k:'cameraFov',l:'视角FOV',mn:20,mx:120,st:1},
+      {s:'🌸 花瓣动画'},{k:'startProgress',l:'绽放进度',mn:0,mx:1,st:0.01},{k:'cycleDuration',l:'循环周期(秒)',mn:2,mx:12,st:0.5},{k:'petalRotStep',l:'花瓣旋转角度',mn:90,mx:180,st:1},
+      {s:'🌿 花瓣形态'},{k:'scaleMinY',l:'初始Y缩放',mn:0.001,mx:0.5,st:0.01},{k:'scaleMaxY',l:'目标Y缩放',mn:0.1,mx:1.5,st:0.05},{k:'scaleMinZ',l:'初始Z缩放',mn:0.05,mx:1,st:0.05},{k:'scaleMaxZ',l:'目标Z缩放',mn:0.1,mx:1,st:0.05},
+      {s:'🔄 弯曲'},{k:'bendMin',l:'弯曲起始',mn:-3,mx:3,st:0.1},{k:'bendMax',l:'弯曲结束',mn:-5,mx:3,st:0.1},
+      {s:'💡 环境光'},{k:'envIntensity',l:'HDR强度',mn:0,mx:2,st:0.05},{k:'envRotation',l:'HDR旋转',mn:-3.14,mx:3.14,st:0.05},
+      {s:'🌀 鼠标扭曲'},{k:'distortStrength',l:'扭曲强度',mn:0,mx:0.3,st:0.005},{k:'distortBrush',l:'笔刷大小',mn:0.01,mx:0.3,st:0.01},{k:'distortFade',l:'衰减速率',mn:0.5,mx:0.99,st:0.01},
+      {s:'✨ 粒子'},{k:'particleSize',l:'粒子大小',mn:0.001,mx:0.05,st:0.001},{k:'particleGravity',l:'重力',mn:0,mx:0.05,st:0.001},{k:'particleSpread',l:'分布范围',mn:5,mx:50,st:1},
+      {s:'🌿 花茎'},{k:'stemRoughness',l:'粗糙度',mn:0,mx:1,st:0.05},{k:'stemPosY',l:'Y偏移',mn:-5,mx:0,st:0.1}
     ],
-    pal:[]
+    pal:[{k:'bgColorTop',l:'背景顶部'},{k:'bgColorBot',l:'背景底部'}]
   },
   tulip: {
     title:'Tulip 郁金香', desc:'GLB 模型生长动画 · 贴图材质 + 阶段式生长 + easeOutBack + 风力摇摆',
@@ -962,7 +977,13 @@ animate();
       return;
     }
 
-    // ---- D. ProceduralEntity / Flora ----
+    // ---- D. Bloom (自定义渲染管线) ----
+    if (currentMode === 'bloom' && entity.applyParam) {
+      entity.applyParam(key, value);
+      return;
+    }
+
+    // ---- E. ProceduralEntity / Flora ----
     // 实时修改内部参数
     if (entity._params) entity._params[key] = value;
     if (entity.options) entity.options[key] = value;
