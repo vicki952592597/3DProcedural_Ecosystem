@@ -142,7 +142,7 @@ export class Bloom {
     pmrem.compileEquirectangularShader();
     const envRT = pmrem.fromEquirectangular(hdr);
     this._scene.environment = envRT.texture;
-    this._scene.environmentIntensity = 0.5;
+    this._scene.environmentIntensity = 0.8;
     this._scene.environmentRotation = new THREE.Euler(0, -Math.PI / 1.5, 0);
     hdr.dispose();
     pmrem.dispose();
@@ -162,13 +162,20 @@ export class Bloom {
     // 花瓣 — 128 InstancedMesh, 140° 旋转
     this._setupPetals(petalGLTF);
 
-    // 补光 — 花蕊上方点光源 + 底部微弱补光
-    const pointLight = new THREE.PointLight(0xffffff, 2.0, 8, 1.5);
-    pointLight.position.set(0, 1.5, 0.5);
-    this._group.add(pointLight);
-    this._pointLight = pointLight;
+    // 补光 — 花蕊正上方主光 + 前方补光 + 环境光
+    const topLight = new THREE.PointLight(0xeeeeff, 4.0, 10, 1.0);
+    topLight.position.set(0, 2.0, 0.3);
+    this._group.add(topLight);
+    this._pointLight = topLight;
 
-    const ambientLight = new THREE.AmbientLight(0x404060, 0.3);
+    // 前方补光（让正面花瓣更亮）
+    const frontLight = new THREE.DirectionalLight(0xdddeff, 0.8);
+    frontLight.position.set(0, 1, 3);
+    frontLight.lookAt(0, 0, 0);
+    this._scene.add(frontLight);
+
+    // 微弱环境光避免纯黑
+    const ambientLight = new THREE.AmbientLight(0x606080, 0.4);
     this._scene.add(ambientLight);
     this._ambientLight = ambientLight;
 
@@ -186,18 +193,18 @@ export class Bloom {
 
     // 原版: MeshStandardNodeMaterial, side=DoubleSide
     // 使用 onBeforeCompile 注入顶点变形 (WebGL 等效 TSL positionNode)
+    // GLB 材质: 只有 baseColor + emissive + normal (无 roughness/metalness 贴图)
     const mat = new THREE.MeshStandardMaterial({
       side: THREE.DoubleSide,
       map: srcMat.map,
       normalMap: srcMat.normalMap,
-      roughnessMap: srcMat.roughnessMap,
-      metalnessMap: srcMat.metalnessMap,
       emissiveMap: srcMat.emissiveMap,
-      emissive: new THREE.Color(1, 1, 1),  // 启用 emissiveMap
-      emissiveIntensity: 0.3,               // 花蕊自发光
-      roughness: srcMat.roughness ?? 0.5,
-      metalness: srcMat.metalness ?? 0.0,
-      envMapIntensity: 1.0,                 // 增强环境反射
+      emissive: new THREE.Color(1, 1, 1),  // 启用 emissiveMap（白色 × emissiveMap）
+      emissiveIntensity: 0.8,              // 原版花有明显自发光
+      roughness: 0.35,                     // 略微光滑，产生环境高光
+      metalness: 0.05,                     // 微弱金属质感增加反射
+      envMapIntensity: 1.5,                // 强化 HDR 环境反射
+      normalScale: new THREE.Vector2(1.0, 1.0),
     });
 
     // 确保贴图色彩空间正确
