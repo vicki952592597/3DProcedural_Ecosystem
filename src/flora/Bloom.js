@@ -162,6 +162,16 @@ export class Bloom {
     // 花瓣 — 128 InstancedMesh, 140° 旋转
     this._setupPetals(petalGLTF);
 
+    // 补光 — 花蕊上方点光源 + 底部微弱补光
+    const pointLight = new THREE.PointLight(0xffffff, 2.0, 8, 1.5);
+    pointLight.position.set(0, 1.5, 0.5);
+    this._group.add(pointLight);
+    this._pointLight = pointLight;
+
+    const ambientLight = new THREE.AmbientLight(0x404060, 0.3);
+    this._scene.add(ambientLight);
+    this._ambientLight = ambientLight;
+
     // 粒子 — 原版: 20x20=400个, size=0.01, gravity=-0.0098, spread=20
     this._setupParticles();
   }
@@ -183,10 +193,16 @@ export class Bloom {
       roughnessMap: srcMat.roughnessMap,
       metalnessMap: srcMat.metalnessMap,
       emissiveMap: srcMat.emissiveMap,
+      emissive: new THREE.Color(1, 1, 1),  // 启用 emissiveMap
+      emissiveIntensity: 0.3,               // 花蕊自发光
+      roughness: srcMat.roughness ?? 0.5,
+      metalness: srcMat.metalness ?? 0.0,
+      envMapIntensity: 1.0,                 // 增强环境反射
     });
 
     // 确保贴图色彩空间正确
     if (mat.map) mat.map.colorSpace = THREE.SRGBColorSpace;
+    if (mat.emissiveMap) mat.emissiveMap.colorSpace = THREE.SRGBColorSpace;
 
     const uStartProgress = this._uStartProgress;
     const uTime = this._uTime;
@@ -458,7 +474,7 @@ export class Bloom {
 
         float distToSeg(vec2 p, vec2 a, vec2 b) {
           vec2 pa = p - a, ba = b - a;
-          float h = clamp(dot(pa, ba) / dot(ba, ba), 0.0, 1.0);
+          float h = clamp(dot(pa, ba) / max(dot(ba, ba), 1e-6), 0.0, 1.0);
           return length(pa - ba * h);
         }
 
@@ -468,25 +484,24 @@ export class Bloom {
           vec2 a = uLastPointer * asp;
           vec2 b = uPointer * asp;
 
-          // 原版: 两种笔刷 — 线段距离 + 点到点
+          // 线段笔刷
           float segDist = distToSeg(p, a, b);
-          float segBrush = 1.0 - smoothstep(0.0, uBrushSize, segDist);
+          float brush = 1.0 - smoothstep(0.0, uBrushSize, segDist);
 
-          vec2 dir = b - a;
-          float proj = clamp(dot(p - a, dir) / dot(dir, dir), 0.0, 1.0);
-          float segMix = segBrush * proj * (1.0 - uFadingRate) + uFadingRate;
+          // 鼠标移动方向作为扭曲方向
+          vec2 dir = normalize(b - a + vec2(0.001));
+          float dirInfluence = brush * dot(normalize(p - a + vec2(0.001)), dir) * 0.5 + 0.5;
 
+          // 衰减前一帧
           vec4 prev = texture2D(tPrev, vUv) * uFadingRate;
 
-          float ptDist = length(p - b);
-          float ptBrush = 1.0 - smoothstep(0.0, uBrushSize, ptDist);
+          // 鼠标移动强度
+          float influence = uIsPointerEnter * smoothstep(0.0001, 0.005, uDiff);
 
-          float influence = uIsPointerEnter * smoothstep(0.001, 0.01, uDiff);
+          // 用鼠标速度和方向产生扭曲量
+          vec2 distortVec = dir * brush * influence * uDiff * 8.0;
 
-          vec4 newVal = mix(prev, vec4(uIsPointerEnter, 0.0, 0.0, 1.0), ptBrush);
-          vec4 segVal = mix(prev, vec4(uIsPointerEnter, 0.0, 0.0, 1.0), segMix);
-
-          gl_FragColor = mix(prev, segVal, influence);
+          gl_FragColor = vec4(prev.rg + distortVec, 0.0, 1.0);
         }
       `,
     });
@@ -524,7 +539,7 @@ export class Bloom {
         varying vec2 vUv;
         void main() {
           vec4 d = texture2D(tDistort, vUv);
-          vec2 uv = vec2(vUv.x + d.r * uDistortStrength, vUv.y);
+          vec2 uv = vUv + d.rg * uDistortStrength;
           gl_FragColor = texture2D(tScene, uv);
         }
       `,
