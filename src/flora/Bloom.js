@@ -276,45 +276,38 @@ export class Bloom {
       );
 
       // ─── 法线重算 (原版 finite difference 1:1) ───
-      // 原版 positionNode 中: pos2 = deform(pos + (0, 0.01, 0)), pos3 = deform(pos + (0.01, 0, 0))
-      // objectNormal = normalize(cross(normalize(pos2-pos), normalize(pos3-pos)))
+      // 安全注入点: 在 project_vertex 之前覆盖 vNormal
       shader.vertexShader = shader.vertexShader.replace(
-        '#include <defaultnormal_vertex>',
+        '#include <project_vertex>',
         /* glsl */`
-        // ── Finite difference normal recalculation (原版 1:1) ──
-        float fd_iid = float(gl_InstanceID);
-        float fd_phaseOffset = fd_iid / 64.0 * 6.0;
-        float fd_nt = mod(uTime + fd_phaseOffset, 6.0) / 6.0;
-        float fd_bendStr = mix(1.0, -2.0, uStartProgress);
-        float fd_curv = mix(6.28318, fd_bendStr * 3.14159, fd_nt);
-        vec3 fd_sf = mix(vec3(0.8, 0.01, 0.3), vec3(0.8, 0.7, 0.4), uStartProgress);
-        float fd_bloomS = clamp(fd_nt / 0.5, 0.0, 1.0);
-        float fd_shrinkT = clamp((fd_nt - 0.5) / 0.5, 0.0, 1.0);
-        float fd_shrinkS = mix(0.8, 0.2, fd_shrinkT);
-        float fd_yAngle = 3.14159 * -0.3 * uStartProgress;
+        {
+          float fd_po = float(gl_InstanceID) / 64.0 * 6.0;
+          float fd_nt = mod(uTime + fd_po, 6.0) / 6.0;
+          float fd_bs = mix(1.0, -2.0, uStartProgress);
+          float fd_cv = mix(6.28318, fd_bs * 3.14159, fd_nt);
+          vec3 fd_sf = mix(vec3(0.8, 0.01, 0.3), vec3(0.8, 0.7, 0.4), uStartProgress);
+          float fd_bl = clamp(fd_nt / 0.5, 0.0, 1.0);
+          float fd_sh = mix(0.8, 0.2, clamp((fd_nt - 0.5) / 0.5, 0.0, 1.0));
+          float fd_ya = 3.14159 * -0.3 * uStartProgress;
 
-        // 原版: shift = vec2(0.01, 0), pos2 = deform(pos + shift.yyx), pos3 = deform(pos + shift.xyy)
-        vec3 fd_shift_yyx = vec3(0.0, 0.0, 0.01); // shift.yyx = (0, 0, 0.01)
-        vec3 fd_shift_xyy = vec3(0.01, 0.0, 0.0); // shift.xyy = (0.01, 0, 0)
+          vec3 fd_p2 = position + vec3(0.0, 0.0, 0.01);
+          fd_p2 = tslScale(fd_p2, fd_sf);
+          fd_p2 = tslBend(fd_p2, fd_cv, vec3(0.0));
+          fd_p2 = tslScale(fd_p2, vec3(fd_bl));
+          fd_p2 = tslScale(fd_p2, vec3(fd_sh));
+          fd_p2 = tslRotateY(fd_p2, fd_ya);
 
-        vec3 fd_pos2 = position + fd_shift_yyx;
-        fd_pos2 = tslScale(fd_pos2, fd_sf);
-        fd_pos2 = tslBend(fd_pos2, fd_curv, vec3(0.0));
-        fd_pos2 = tslScale(fd_pos2, vec3(fd_bloomS));
-        fd_pos2 = tslScale(fd_pos2, vec3(fd_shrinkS));
-        fd_pos2 = tslRotateY(fd_pos2, fd_yAngle);
+          vec3 fd_p3 = position + vec3(0.01, 0.0, 0.0);
+          fd_p3 = tslScale(fd_p3, fd_sf);
+          fd_p3 = tslBend(fd_p3, fd_cv, vec3(0.0));
+          fd_p3 = tslScale(fd_p3, vec3(fd_bl));
+          fd_p3 = tslScale(fd_p3, vec3(fd_sh));
+          fd_p3 = tslRotateY(fd_p3, fd_ya);
 
-        vec3 fd_pos3 = position + fd_shift_xyy;
-        fd_pos3 = tslScale(fd_pos3, fd_sf);
-        fd_pos3 = tslBend(fd_pos3, fd_curv, vec3(0.0));
-        fd_pos3 = tslScale(fd_pos3, vec3(fd_bloomS));
-        fd_pos3 = tslScale(fd_pos3, vec3(fd_shrinkS));
-        fd_pos3 = tslRotateY(fd_pos3, fd_yAngle);
-
-        vec3 fd_objectNormal = normalize(cross(normalize(fd_pos2 - transformed), normalize(fd_pos3 - transformed)));
-        objectNormal = fd_objectNormal;
-
-        #include <defaultnormal_vertex>
+          vec3 fd_n = normalize(cross(normalize(fd_p2 - transformed), normalize(fd_p3 - transformed)));
+          vNormal = normalize(normalMatrix * fd_n);
+        }
+        #include <project_vertex>
         `
       );
 
