@@ -142,7 +142,7 @@ export class Bloom {
     pmrem.compileEquirectangularShader();
     const envRT = pmrem.fromEquirectangular(hdr);
     this._scene.environment = envRT.texture;
-    this._scene.environmentIntensity = 0.8;
+    this._scene.environmentIntensity = 0.5;
     this._scene.environmentRotation = new THREE.Euler(0, -Math.PI / 1.5, 0);
     hdr.dispose();
     pmrem.dispose();
@@ -162,20 +162,9 @@ export class Bloom {
     // 花瓣 — 128 InstancedMesh, 140° 旋转
     this._setupPetals(petalGLTF);
 
-    // 补光 — 花蕊正上方主光 + 前方补光 + 环境光
-    const topLight = new THREE.PointLight(0xeeeeff, 4.0, 10, 1.0);
-    topLight.position.set(0, 2.0, 0.3);
-    this._group.add(topLight);
-    this._pointLight = topLight;
-
-    // 前方补光（让正面花瓣更亮）
-    const frontLight = new THREE.DirectionalLight(0xdddeff, 0.8);
-    frontLight.position.set(0, 1, 3);
-    frontLight.lookAt(0, 0, 0);
-    this._scene.add(frontLight);
-
-    // 微弱环境光避免纯黑
-    const ambientLight = new THREE.AmbientLight(0x606080, 0.4);
+    // 原版无额外光源，纯 HDR 环境 + emissive 驱动
+    // 只加一个微弱环境光避免完全无光的死黑
+    const ambientLight = new THREE.AmbientLight(0x8888aa, 0.15);
     this._scene.add(ambientLight);
     this._ambientLight = ambientLight;
 
@@ -200,10 +189,10 @@ export class Bloom {
       normalMap: srcMat.normalMap,
       emissiveMap: srcMat.emissiveMap,
       emissive: new THREE.Color(1, 1, 1),  // 启用 emissiveMap（白色 × emissiveMap）
-      emissiveIntensity: 0.8,              // 原版花有明显自发光
-      roughness: 0.35,                     // 略微光滑，产生环境高光
-      metalness: 0.05,                     // 微弱金属质感增加反射
-      envMapIntensity: 1.5,                // 强化 HDR 环境反射
+      emissiveIntensity: 0.4,              // 柔和自发光，不过曝
+      roughness: 0.45,                     // 半光滑，柔和高光
+      metalness: 0.0,                      // 非金属
+      envMapIntensity: 1.2,                // HDR 反射适度增强
       normalScale: new THREE.Vector2(1.0, 1.0),
     });
 
