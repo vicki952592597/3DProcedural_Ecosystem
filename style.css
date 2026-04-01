@@ -312,6 +312,7 @@ canvas { display:block; }
   font-family:-apple-system,"SF Pro Text","Helvetica Neue","Consolas",monospace;
   overflow:hidden; display:none; flex-direction:column;
 }
+.tc-body { overflow-y:auto; flex:1; min-height:0; }
 .tc-panel.tc-visible { display:flex; }
 
 .tc-header {
@@ -385,6 +386,7 @@ canvas { display:block; }
 .tc-footer {
   display:flex; gap:4px; padding:6px 10px;
   border-top:1px solid rgba(255,255,255,0.06);
+  flex-shrink:0;
 }
 .tc-footer-btn {
   flex:1; padding:4px 0; background:rgba(255,255,255,0.06);

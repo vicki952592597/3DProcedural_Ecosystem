@@ -61,14 +61,25 @@ const SC = {
     pal:[]
   },
   bloom: {
-    title:'Bloom 绽放', desc:'Deadrabbit 花朵绽放 1:1 复刻 · 128 花瓣 InstancedMesh + HDR 环境光 + 鼠标交互扭曲',
-    tags:[['InstancedMesh','green'],['HDR Env','purple'],['Distortion','pink']],
+    title:'Bloom 绽放', desc:'多材质花朵绽放 · SSS / Fresnel / 彩虹 / 丝绸 / 水晶 5种 Shader 可切换',
+    tags:[['Multi-Shader','green'],['SSS','purple'],['Fresnel','pink']],
     cam:null, look:null,
     defs:{
       envIntensity:0.5, envRotation:-2.094, cameraZoom:2.5, cameraFov:75,
       startProgress:1, cycleDuration:6, petalRotStep:140,
       scaleMinY:0.01, scaleMaxY:0.7, scaleMinZ:0.3, scaleMaxZ:0.4,
       bendMin:1, bendMax:-2,
+      // 材质系统
+      shaderType:0,
+      baseColor:'#c08cf2', roughness:0.55, metalness:0,
+      emissiveColor:'#804db3', emissiveIntensity:0.8,
+      sssIntensity:0.6, sssColor:'#cc80ff',
+      fresnelPower:2.5, fresnelColor:'#8059cc', fresnelIntensity:0.5,
+      pointLightIntensity:3.5, pointLightColor:'#e6b3ff', pointLightY:0.3,
+      envLightIntensity:1.2, dirLightIntensity:0.8,
+      translucency:0.5,
+      rimWidth:0.3, rimColor:'#6644aa', rimIntensity:0.0,
+      // 交互 & 粒子
       distortStrength:0.05, distortBrush:0.08, distortFade:0.9,
       particleSize:0.01, particleGravity:0.0098, particleSpread:20,
       stemRoughness:0.5, stemPosY:-3.3,
@@ -76,10 +87,35 @@ const SC = {
     },
     sl:[
       {s:'📷 相机'},{k:'cameraZoom',l:'缩放',mn:0.5,mx:5,st:0.1},{k:'cameraFov',l:'视角FOV',mn:20,mx:120,st:1},
-      {s:'🌸 花瓣动画'},{k:'startProgress',l:'绽放进度',mn:0,mx:1,st:0.01},{k:'cycleDuration',l:'循环周期(秒)',mn:2,mx:12,st:0.5},{k:'petalRotStep',l:'花瓣旋转角度',mn:90,mx:180,st:1},
+      {s:'🎨 材质类型'},
+      {k:'shaderType',l:'Shader',mn:0,mx:4,st:1, labels:['SSS 通透','Fresnel 菲涅尔','Iridescent 彩虹','Silk 丝绸','Crystal 水晶']},
+      {s:'� 材质颜色'},
+      {k:'baseColor',l:'花瓣基色',type:'color'},
+      {k:'emissiveColor',l:'自发光色',type:'color'},
+      {k:'sssColor',l:'SSS 散射色',type:'color'},
+      {k:'fresnelColor',l:'菲涅尔色',type:'color'},
+      {k:'pointLightColor',l:'点光源色',type:'color'},
+      {s:'🔆 材质参数'},
+      {k:'roughness',l:'粗糙度',mn:0,mx:1,st:0.01},
+      {k:'metalness',l:'金属度',mn:0,mx:1,st:0.01},
+      {k:'emissiveIntensity',l:'自发光强度',mn:0,mx:3,st:0.05},
+      {k:'sssIntensity',l:'SSS 散射强度',mn:0,mx:2,st:0.05},
+      {k:'translucency',l:'通透度',mn:0,mx:1,st:0.01},
+      {s:'✨ 菲涅尔'},
+      {k:'fresnelPower',l:'菲涅尔指数',mn:0.5,mx:8,st:0.1},
+      {k:'fresnelIntensity',l:'菲涅尔强度',mn:0,mx:2,st:0.05},
+      {s:'� 描边/轮廓'},
+      {k:'rimIntensity',l:'描边强度',mn:0,mx:2,st:0.05},
+      {k:'rimWidth',l:'描边宽度',mn:0.05,mx:2,st:0.05},
+      {k:'rimColor',l:'描边颜色',type:'color'},
+      {s:'�💡 光照'},
+      {k:'pointLightIntensity',l:'点光源强度',mn:0,mx:10,st:0.1},
+      {k:'pointLightY',l:'点光源高度',mn:-2,mx:3,st:0.1},
+      {k:'envLightIntensity',l:'环境光强度',mn:0,mx:3,st:0.05},
+      {k:'dirLightIntensity',l:'方向光强度',mn:0,mx:3,st:0.05},
+      {s:'�🌸 花瓣动画'},{k:'startProgress',l:'绽放进度',mn:0,mx:1,st:0.01},{k:'cycleDuration',l:'循环周期(秒)',mn:2,mx:12,st:0.5},{k:'petalRotStep',l:'花瓣旋转角度',mn:90,mx:180,st:1},
       {s:'🌿 花瓣形态'},{k:'scaleMinY',l:'初始Y缩放',mn:0.001,mx:0.5,st:0.01},{k:'scaleMaxY',l:'目标Y缩放',mn:0.1,mx:1.5,st:0.05},{k:'scaleMinZ',l:'初始Z缩放',mn:0.05,mx:1,st:0.05},{k:'scaleMaxZ',l:'目标Z缩放',mn:0.1,mx:1,st:0.05},
       {s:'🔄 弯曲'},{k:'bendMin',l:'弯曲起始',mn:-3,mx:3,st:0.1},{k:'bendMax',l:'弯曲结束',mn:-5,mx:3,st:0.1},
-      {s:'💡 环境光'},{k:'envIntensity',l:'HDR强度',mn:0,mx:2,st:0.05},{k:'envRotation',l:'HDR旋转',mn:-3.14,mx:3.14,st:0.05},
       {s:'🌀 鼠标扭曲'},{k:'distortStrength',l:'扭曲强度',mn:0,mx:0.3,st:0.005},{k:'distortBrush',l:'笔刷大小',mn:0.01,mx:0.3,st:0.01},{k:'distortFade',l:'衰减速率',mn:0.5,mx:0.99,st:0.01},
       {s:'✨ 粒子'},{k:'particleSize',l:'粒子大小',mn:0.001,mx:0.05,st:0.001},{k:'particleGravity',l:'重力',mn:0,mx:0.05,st:0.001},{k:'particleSpread',l:'分布范围',mn:5,mx:50,st:1},
       {s:'🌿 花茎'},{k:'stemRoughness',l:'粗糙度',mn:0,mx:1,st:0.05},{k:'stemPosY',l:'Y偏移',mn:-5,mx:0,st:0.1}
@@ -838,25 +874,67 @@ animate();
       const min = item.mn; const max = item.mx; const step = item.st;
       const initVal = currentParams[key] ?? cfg.defs[key];
 
-      // 判断是颜色参数还是数值参数
-      const isColor = /color|background|tint|hue/i.test(key) && typeof initVal === 'number' && initVal > 0xFFF;
+      // 判断控件类型
+      const isExplicitColor = item.type === 'color';  // 显式颜色(字符串hex)
+      const isNumericColor = /color|background|tint|hue/i.test(key) && typeof initVal === 'number' && initVal > 0xFFF;
+      const hasLabels = item.labels && Array.isArray(item.labels);  // 枚举选择器
 
       const row = document.createElement('div');
       row.className = 'tc-row';
 
-      if (isColor) {
-        // ===== 颜色控件 =====
-        const hex = '#' + (initVal & 0xFFFFFF).toString(16).padStart(6, '0');
+      if (hasLabels) {
+        // ===== 枚举选择器 (下拉菜单) =====
+        const iv = typeof initVal === 'number' ? initVal : 0;
+        let opts = '';
+        item.labels.forEach((lbl, idx) => {
+          opts += `<option value="${idx}" ${idx === iv ? 'selected' : ''}>${lbl}</option>`;
+        });
+        row.innerHTML = `
+          <span class="tc-label" title="${key}">${label}</span>
+          <select class="tc-select" style="flex:1;background:#1a1a2e;color:#e0e0ff;border:1px solid rgba(120,100,255,0.3);border-radius:4px;padding:3px 6px;font-size:11px;outline:none;cursor:pointer;">
+            ${opts}
+          </select>
+        `;
+        const sel = row.querySelector('.tc-select');
+        sel.addEventListener('change', () => {
+          const v = parseInt(sel.value);
+          _tcApplyParam(key, v, false);
+        });
+      } else if (isExplicitColor) {
+        // ===== 字符串颜色控件 (hex string) + RGB 显示 =====
+        const hex = typeof initVal === 'string' ? initVal : '#c08cf2';
+        const _hexToRGB = h => { const n = parseInt(h.slice(1),16); return `${(n>>16)&255}, ${(n>>8)&255}, ${n&255}`; };
+        row.style.flexWrap = 'wrap';
         row.innerHTML = `
           <span class="tc-label" title="${key}">${label}</span>
           <input type="color" class="tc-color" value="${hex}">
-          <span class="tc-value">${hex}</span>
+          <span class="tc-value" style="width:auto;font-size:9px;color:#9988bb;">${hex} <span class="tc-rgb" style="color:#667">(${_hexToRGB(hex)})</span></span>
         `;
         const picker = row.querySelector('.tc-color');
         const display = row.querySelector('.tc-value');
+        const rgbSpan = row.querySelector('.tc-rgb');
+        picker.addEventListener('input', () => {
+          display.childNodes[0].textContent = picker.value + ' ';
+          rgbSpan.textContent = `(${_hexToRGB(picker.value)})`;
+          _tcApplyParam(key, picker.value, false);
+        });
+      } else if (isNumericColor) {
+        // ===== 数值颜色控件 (0xRRGGBB) + RGB 显示 =====
+        const hex = '#' + (initVal & 0xFFFFFF).toString(16).padStart(6, '0');
+        const _hexToRGB2 = h => { const n = parseInt(h.slice(1),16); return `${(n>>16)&255}, ${(n>>8)&255}, ${n&255}`; };
+        row.style.flexWrap = 'wrap';
+        row.innerHTML = `
+          <span class="tc-label" title="${key}">${label}</span>
+          <input type="color" class="tc-color" value="${hex}">
+          <span class="tc-value" style="width:auto;font-size:9px;color:#9988bb;">${hex} <span class="tc-rgb" style="color:#667">(${_hexToRGB2(hex)})</span></span>
+        `;
+        const picker = row.querySelector('.tc-color');
+        const display = row.querySelector('.tc-value');
+        const rgbSpan = row.querySelector('.tc-rgb');
         picker.addEventListener('input', () => {
           const v = parseInt(picker.value.slice(1), 16);
-          display.textContent = picker.value;
+          display.childNodes[0].textContent = picker.value + ' ';
+          rgbSpan.textContent = `(${_hexToRGB2(picker.value)})`;
           _tcApplyParam(key, v, false);
         });
       } else {

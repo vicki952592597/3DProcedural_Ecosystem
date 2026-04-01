@@ -69,6 +69,29 @@ export class Bloom {
     this._uScaleMaxZ = { value: 0.4 };
     this._uBendMin = { value: 1 };
     this._uBendMax = { value: -2 };
+
+    // ── 材质系统 uniforms ──
+    this._uBaseColor = { value: new THREE.Color(0.75, 0.55, 0.95) };  // 花瓣基色（淡紫）
+    this._uRoughness = { value: 0.55 };
+    this._uMetalness = { value: 0.0 };
+    this._uEmissiveColor = { value: new THREE.Color(0.5, 0.3, 0.8) };
+    this._uEmissiveIntensity = { value: 0.8 };
+    this._uSSSIntensity = { value: 0.6 };      // 3S 次表面散射强度
+    this._uSSSColor = { value: new THREE.Color(0.8, 0.5, 1.0) };
+    this._uFresnelPower = { value: 2.5 };       // 菲涅尔指数
+    this._uFresnelColor = { value: new THREE.Color(0.5, 0.35, 0.8) };
+    this._uFresnelIntensity = { value: 0.5 };
+    this._uPointLightIntensity = { value: 3.5 };
+    this._uPointLightColor = { value: new THREE.Color(0.9, 0.7, 1.0) };
+    this._uPointLightY = { value: 0.3 };
+    this._uEnvLightIntensity = { value: 1.2 };
+    this._uDirLightIntensity = { value: 0.8 };
+    this._uTranslucency = { value: 0.5 };       // 通透度
+    this._uShaderType = { value: 0 };           // 0=SSS, 1=Fresnel, 2=Iridescent, 3=Silk, 4=Crystal
+    this._uRimWidth = { value: 0.3 };
+    this._uRimColor = { value: new THREE.Color(0.4, 0.27, 0.67) };
+    this._uRimIntensity = { value: 0.0 };       // 默认0=无描边
+
     // 运行时参数
     this._params = {
       particleGravity: 0.0098,
@@ -95,7 +118,7 @@ export class Bloom {
     // R3F 的 zoom 在 PerspectiveCamera 上等效缩小 fov
     // 原版 fov=75 (R3F默认), zoom=2.5 → 等效 fov ≈ 75/2.5 = 30
     this._camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 100);
-    this._camera.position.set(0, 2, 0); // 入场起始 z=0, 动画到 z=2
+    this._camera.position.set(0, 4, 0.3); // 入场起始：正上方俯瞰，完全遮住根茎
     this._camera.zoom = 2.5;
     this._camera.updateProjectionMatrix();
     this._camera.lookAt(0, 0, 0);
@@ -147,13 +170,20 @@ export class Bloom {
     hdr.dispose();
     pmrem.dispose();
 
-    // 花茎 — 原版: position=[0,-3.3,-0.03] scale=[0.8,0.8,0.8] roughness=0.5 color=#fff
+    // 花茎 — 使用与花瓣协调的淡紫色调材质
     const stem = stemGLTF.scene;
     stem.position.set(0, -3.3, -0.03);
     stem.scale.setScalar(0.8);
     stem.traverse(c => {
       if (c.isMesh) {
-        c.material = new THREE.MeshStandardMaterial({ roughness: 0.5, color: '#ffffff' });
+        c.material = new THREE.MeshStandardMaterial({
+          roughness: 0.4,
+          metalness: 0.0,
+          color: new THREE.Color(0.88, 0.84, 0.92),  // 接近白色带一丝紫
+          emissive: new THREE.Color(0.25, 0.22, 0.32),
+          emissiveIntensity: 0.5,
+          envMapIntensity: 1.2,
+        });
       }
     });
     this._group.add(stem);
@@ -180,200 +210,395 @@ export class Bloom {
     });
     if (!geo) return;
 
-    // 原版: MeshStandardNodeMaterial, side=DoubleSide
-    // 使用 onBeforeCompile 注入顶点变形 (WebGL 等效 TSL positionNode)
-    // GLB 材质: 只有 baseColor + emissive + normal (无 roughness/metalness 贴图)
-    const mat = new THREE.MeshStandardMaterial({
+    // 贴图色彩空间
+    if (srcMat.map) srcMat.map.colorSpace = THREE.SRGBColorSpace;
+    if (srcMat.emissiveMap) srcMat.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+
+    // 完全自定义 ShaderMaterial — 多材质系统 (SSS / Fresnel / 彩虹 / 丝绸 / 水晶)
+    const mat = new THREE.ShaderMaterial({
       side: THREE.DoubleSide,
-      map: srcMat.map,
-      normalMap: srcMat.normalMap,
-      emissiveMap: srcMat.emissiveMap,
-      emissive: new THREE.Color(1, 1, 1),  // 启用 emissiveMap
-      emissiveIntensity: 0.5,              // 自发光让暗部通透
-      roughness: 0.6,                      // 柔和漫反射，减少高光对比
-      metalness: 0.0,
-      envMapIntensity: 1.0,
-      normalScale: new THREE.Vector2(1.0, 1.0),
-    });
+      transparent: true,
+      uniforms: {
+        uStartProgress: this._uStartProgress,
+        uTime: this._uTime,
+        uCycleDuration: this._uCycleDuration,
+        uScaleMinY: this._uScaleMinY,
+        uScaleMaxY: this._uScaleMaxY,
+        uScaleMinZ: this._uScaleMinZ,
+        uScaleMaxZ: this._uScaleMaxZ,
+        uBendMin: this._uBendMin,
+        uBendMax: this._uBendMax,
+        tMap: { value: srcMat.map },
+        tEmissive: { value: srcMat.emissiveMap },
+        tNormal: { value: srcMat.normalMap },
+        // 材质参数
+        uBaseColor: this._uBaseColor,
+        uRoughness: this._uRoughness,
+        uMetalness: this._uMetalness,
+        uEmissiveColor: this._uEmissiveColor,
+        uEmissiveIntensity: this._uEmissiveIntensity,
+        uSSSIntensity: this._uSSSIntensity,
+        uSSSColor: this._uSSSColor,
+        uFresnelPower: this._uFresnelPower,
+        uFresnelColor: this._uFresnelColor,
+        uFresnelIntensity: this._uFresnelIntensity,
+        uPointLightIntensity: this._uPointLightIntensity,
+        uPointLightColor: this._uPointLightColor,
+        uPointLightY: this._uPointLightY,
+        uEnvLightIntensity: this._uEnvLightIntensity,
+        uDirLightIntensity: this._uDirLightIntensity,
+        uTranslucency: this._uTranslucency,
+        uShaderType: this._uShaderType,
+        uRimWidth: this._uRimWidth,
+        uRimColor: this._uRimColor,
+        uRimIntensity: this._uRimIntensity,
+      },
+      vertexShader: /* glsl */`
+        uniform float uStartProgress, uTime, uCycleDuration;
+        uniform float uScaleMinY, uScaleMaxY, uScaleMinZ, uScaleMaxZ;
+        uniform float uBendMin, uBendMax;
 
-    // 确保贴图色彩空间正确
-    if (mat.map) mat.map.colorSpace = THREE.SRGBColorSpace;
-    if (mat.emissiveMap) mat.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+        varying vec2 vUv;
+        varying vec3 vNormal;
+        varying vec3 vWorldPos;
+        varying vec3 vViewDir;
 
-    const uStartProgress = this._uStartProgress;
-    const uTime = this._uTime;
+        vec3 tslBend(vec3 p, float f) {
+          if(abs(f) < 1e-5) return p;
+          float a = p.x * f;
+          float sa = sin(a), ca = cos(a);
+          return vec3(
+            -(p.y - 1.0/f) * sa,
+            p.y * ca + (1.0 - ca) / f,
+            p.z
+          );
+        }
 
-    mat.onBeforeCompile = (shader) => {
-      shader.uniforms.uStartProgress = uStartProgress;
-      shader.uniforms.uTime = uTime;
-      shader.uniforms.uCycleDuration = this._uCycleDuration;
-      shader.uniforms.uScaleMinY = this._uScaleMinY;
-      shader.uniforms.uScaleMaxY = this._uScaleMaxY;
-      shader.uniforms.uScaleMinZ = this._uScaleMinZ;
-      shader.uniforms.uScaleMaxZ = this._uScaleMaxZ;
-      shader.uniforms.uBendMin = this._uBendMin;
-      shader.uniforms.uBendMax = this._uBendMax;
+        vec3 tslRotY(vec3 p, float a) {
+          float c = cos(a), s = sin(a);
+          return vec3(p.x*c + p.z*s, p.y, -p.x*s + p.z*c);
+        }
 
-      // ─── 顶点 Shader 注入 ───
-      // 原版 TSL 逻辑 1:1 翻译:
-      // 1. i = instanceID/64*6 → normalizedTime = mod(time+i, 6)/6
-      // 2. bendStrength = mix(startProgress, 0,1, 1,-2)
-      // 3. curvature = mix(n, 0,1, PI*2, bendStrength*PI)
-      // 4. scaleFactor = mix(startProgress, 0,1, (0.8,0.01,0.3), (0.8,0.7,0.4))
-      // 5. scale → bend(axis=2,Z轴) → scale(bloom 0→1 @n<0.5) → scale(shrink 0.8→0.2 @n>0.5) → rotateY(PI*-0.3 + startProgress)
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <common>',
-        /* glsl */`
-        #include <common>
+        vec3 deform(vec3 pos) {
+          float iid = float(gl_InstanceID);
+          float po = iid / 64.0 * uCycleDuration;
+          float nt = mod(uTime + po, uCycleDuration) / uCycleDuration;
+          float bs = mix(uBendMin, uBendMax, uStartProgress);
+          float cv = mix(6.28318, bs * 3.14159, nt);
+          vec3 sf = mix(vec3(0.8, uScaleMinY, uScaleMinZ), vec3(0.8, uScaleMaxY, uScaleMaxZ), uStartProgress);
+          float ya = 3.14159 * -0.3 * uStartProgress;
+
+          pos *= sf;
+          pos = tslBend(pos, cv);
+          pos *= clamp(nt / 0.5, 0.0, 1.0);
+          pos *= mix(0.8, 0.2, clamp((nt - 0.5) / 0.5, 0.0, 1.0));
+          pos = tslRotY(pos, ya);
+          return pos;
+        }
+
+        void main() {
+          vUv = uv;
+
+          vec3 pos = deform(position);
+
+          // Finite difference 法线
+          float e = 0.005;
+          vec3 px = deform(position + vec3(e, 0.0, 0.0));
+          vec3 pz = deform(position + vec3(0.0, 0.0, e));
+          vec3 fdN = normalize(cross(pz - pos, px - pos));
+
+          // 实例矩阵
+          vec4 wp = instanceMatrix * vec4(pos, 1.0);
+          vec4 worldPos4 = modelMatrix * wp;
+          vWorldPos = worldPos4.xyz;
+
+          // 法线: 实例旋转 + 模型旋转
+          mat3 iRot = mat3(instanceMatrix);
+          vNormal = normalize(mat3(modelMatrix) * iRot * fdN);
+
+          // 视线方向
+          vViewDir = normalize(cameraPosition - vWorldPos);
+
+          gl_Position = projectionMatrix * viewMatrix * worldPos4;
+        }
+      `,
+      fragmentShader: /* glsl */`
+        uniform sampler2D tMap;
+        uniform sampler2D tEmissive;
         uniform float uStartProgress;
         uniform float uTime;
-        uniform float uCycleDuration;
-        uniform float uScaleMinY;
-        uniform float uScaleMaxY;
-        uniform float uScaleMinZ;
-        uniform float uScaleMaxZ;
-        uniform float uBendMin;
-        uniform float uBendMax;
+        // 材质参数
+        uniform vec3 uBaseColor;
+        uniform float uRoughness;
+        uniform float uMetalness;
+        uniform vec3 uEmissiveColor;
+        uniform float uEmissiveIntensity;
+        uniform float uSSSIntensity;
+        uniform vec3 uSSSColor;
+        uniform float uFresnelPower;
+        uniform vec3 uFresnelColor;
+        uniform float uFresnelIntensity;
+        uniform float uPointLightIntensity;
+        uniform vec3 uPointLightColor;
+        uniform float uPointLightY;
+        uniform float uEnvLightIntensity;
+        uniform float uDirLightIntensity;
+        uniform float uTranslucency;
+        uniform float uShaderType;
+        uniform float uRimWidth;
+        uniform vec3 uRimColor;
+        uniform float uRimIntensity;
 
-        vec3 tslScale(vec3 p, vec3 s) {
-          return vec3(p.x*s.x, p.y*s.y, p.z*s.z);
+        varying vec2 vUv;
+        varying vec3 vNormal;
+        varying vec3 vWorldPos;
+        varying vec3 vViewDir;
+
+        // ── 工具函数 ──
+        vec3 rgb2hsv(vec3 c) {
+          vec4 K = vec4(0.0, -1.0/3.0, 2.0/3.0, -1.0);
+          vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+          vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+          float d = q.x - min(q.w, q.y);
+          float e = 1.0e-10;
+          return vec3(abs(q.z + (q.w - q.y) / (6.0 * d + e)), d / (q.x + e), q.x);
         }
 
-        // 原版 bend(r_co, factor, axis=2, dcut=(0,0,0), origin=(0,0,0))
-        // axis=2 的 Else 分支: angle = x * factor
-        vec3 tslBend(vec3 p, float factor, vec3 origin) {
-          if(abs(factor) < 1e-5) return p;
-          p -= origin;
-          float cx = p.x;
-          float cy = p.y;
-          float cz = p.z;
-          // axis=2: angle based on x coordinate
-          float angle = cx * factor;
-          float sinA = sin(angle);
-          float cosA = cos(angle);
-          vec3 result;
-          // axis=2 Else branch from original TSL:
-          // d.x = -(y - 1/factor) * sin(angle)
-          // d.y = y * cos(angle) + (1-cos(angle))/factor  
-          // d.z = z (unchanged)
-          result.x = -(cy - (1.0/factor)) * sinA;
-          result.y = cy * cosA + (1.0 - cosA) / factor;
-          result.z = cz;
-          return result + origin;
+        vec3 hsv2rgb(vec3 c) {
+          vec4 K = vec4(1.0, 2.0/3.0, 1.0/3.0, 3.0);
+          vec3 p = abs(fract(c.xxx + K.xyz) * 6.0 - K.www);
+          return c.z * mix(K.xxx, clamp(p - K.xxx, 0.0, 1.0), c.y);
         }
 
-        // 原版 rotate(position, axis=(0,1,0), angle)
-        vec3 tslRotateY(vec3 p, float a) {
-          float ca = cos(a); float sa = sin(a);
-          return vec3(p.x*ca + p.z*sa, p.y, -p.x*sa + p.z*ca);
+        // ── 光照计算 (共用) ──
+        struct LightResult {
+          vec3 pointDiff;
+          vec3 pointSSS;
+          vec3 hemi;
+          vec3 dir;
+          vec3 dirSSS;
+          float fresnel;
+          float attenuation;
+          vec3 Lp;
+          vec3 L;
+        };
+
+        LightResult calcLighting(vec3 N, vec3 V, vec3 worldPos) {
+          LightResult r;
+
+          // 中心点光源
+          vec3 plPos = vec3(0.0, uPointLightY, 0.0);
+          vec3 toLight = plPos - worldPos;
+          float dist = length(toLight);
+          r.Lp = normalize(toLight);
+          r.attenuation = 1.0 / (1.0 + 2.0 * dist + dist * dist);
+          float NdLp = max(dot(N, r.Lp), 0.0) * 0.6 + 0.4;
+          r.pointDiff = uPointLightColor * uPointLightIntensity * r.attenuation * NdLp;
+
+          // 点光SSS
+          float pSSS = max(dot(-N, r.Lp), 0.0);
+          pSSS = pow(pSSS, 1.2);
+          r.pointSSS = uSSSColor * pSSS * r.attenuation * 2.5;
+
+          // 半球光
+          float h = N.y * 0.35 + 0.55;
+          vec3 hBot = uBaseColor * 0.4;
+          vec3 hTop = uBaseColor * 1.1;
+          r.hemi = mix(hBot, hTop, h) * uEnvLightIntensity;
+
+          // 方向光
+          r.L = normalize(vec3(0.2, 0.9, 0.4));
+          float NdL = dot(N, r.L) * 0.5 + 0.5;
+          NdL = NdL * NdL;
+          r.dir = vec3(0.6, 0.5, 0.8) * NdL * uDirLightIntensity;
+
+          // 方向光背光SSS
+          float bs = max(dot(-N, r.L), 0.0);
+          bs = pow(bs, 1.5);
+          r.dirSSS = uSSSColor * bs;
+
+          // 菲涅尔
+          r.fresnel = pow(1.0 - max(dot(N, V), 0.0), uFresnelPower);
+
+          return r;
         }
-        `
-      );
 
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <begin_vertex>',
-        /* glsl */`
-        #include <begin_vertex>
+        // ═══════════════════════════════════════
+        // Shader 0: SSS 次表面散射 (默认 — 通透花瓣)
+        // ═══════════════════════════════════════
+        vec4 shaderSSS(vec3 base, vec3 N, vec3 V, vec3 worldPos, float fadeIn, vec4 tex) {
+          LightResult li = calcLighting(N, V, worldPos);
 
-        // instanceID / 64 * cycleDuration
-        float iid = float(gl_InstanceID);
-        float phaseOffset = iid / 64.0 * uCycleDuration;
-        float nt = mod(uTime + phaseOffset, uCycleDuration) / uCycleDuration;
+          vec3 diffuse = base * (li.hemi + li.dir + li.pointDiff);
+          vec3 sss = base * li.dirSSS * uSSSIntensity;
+          vec3 pSSS = base * li.pointSSS * uSSSIntensity;
+          vec3 rim = uFresnelColor * li.fresnel * uFresnelIntensity;
+          vec3 emissive = texture2D(tEmissive, vUv).rgb * uEmissiveIntensity * fadeIn;
 
-        // bendStrength = mix(startProgress, 0, 1, bendMin, bendMax)
-        float bendStr = mix(uBendMin, uBendMax, uStartProgress);
-        float curv = mix(6.28318, bendStr * 3.14159, nt);
+          // 通透度: 背面也接收光
+          vec3 translucent = base * uTranslucency * max(0.3 - dot(N, V), 0.0);
 
-        // scaleFactor (controllable Y and Z, X fixed at 0.8)
-        vec3 sf = mix(vec3(0.8, uScaleMinY, uScaleMinZ), vec3(0.8, uScaleMaxY, uScaleMaxZ), uStartProgress);
-
-        // 1. scale by startProgress-dependent factor
-        transformed = tslScale(transformed, sf);
-        // 2. bend axis=2, origin=(0,0,0)
-        transformed = tslBend(transformed, curv, vec3(0.0));
-        // 3. bloom scale: remap(nt, 0, 0.5, 0, 1)
-        float bloomS = clamp(nt / 0.5, 0.0, 1.0);
-        transformed = tslScale(transformed, vec3(bloomS));
-        // 4. shrink scale: remap(nt, 0.5, 1, 0.8, 0.2)
-        float shrinkT = clamp((nt - 0.5) / 0.5, 0.0, 1.0);
-        float shrinkS = mix(0.8, 0.2, shrinkT);
-        transformed = tslScale(transformed, vec3(shrinkS));
-        // 5. rotate Y: mul(mul(PI, -0.3), startProgress) = PI * -0.3 * startProgress
-        float yAngle = 3.14159 * -0.3 * uStartProgress;
-        transformed = tslRotateY(transformed, yAngle);
-        `
-      );
-
-      // 法线跟随顶点变形 — 在 defaultnormal_vertex 之前变换 objectNormal
-      // 只做旋转变换（不含缩放），避免对比度过强
-      shader.vertexShader = shader.vertexShader.replace(
-        '#include <defaultnormal_vertex>',
-        /* glsl */`
-        {
-          // 对法线只应用 bend 的旋转部分和 rotateY
-          float fn_po = float(gl_InstanceID) / 64.0 * uCycleDuration;
-          float fn_nt = mod(uTime + fn_po, uCycleDuration) / uCycleDuration;
-          float fn_bs = mix(uBendMin, uBendMax, uStartProgress);
-          float fn_cv = mix(6.28318, fn_bs * 3.14159, fn_nt);
-          float fn_ya = 3.14159 * -0.3 * uStartProgress;
-
-          // Bend 对法线的影响：只取旋转部分
-          // axis=2 bend: angle = nx * factor
-          vec3 n = objectNormal;
-          float bendAngle = n.x * fn_cv * 0.3; // 柔和系数，减轻法线弯曲
-          float bc = cos(bendAngle), bs2 = sin(bendAngle);
-          n = vec3(
-            n.x * bc - n.y * bs2,
-            n.x * bs2 + n.y * bc,
-            n.z
-          );
-
-          // RotateY
-          float yc = cos(fn_ya), ys = sin(fn_ya);
-          objectNormal = vec3(
-            n.x * yc + n.z * ys,
-            n.y,
-            -n.x * ys + n.z * yc
-          );
+          vec3 color = diffuse + sss + pSSS + rim + emissive + translucent;
+          return vec4(color, tex.a);
         }
-        #include <defaultnormal_vertex>
-        `
-      );
 
-      // 背面法线翻转 — 让双面都能接收环境光
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <normal_fragment_begin>',
-        /* glsl */`
-        #include <normal_fragment_begin>
-        if (!gl_FrontFacing) {
-          normal = -normal;
+        // ═══════════════════════════════════════
+        // Shader 1: Fresnel 菲涅尔 (边缘发光 + 玻璃感)
+        // ═══════════════════════════════════════
+        vec4 shaderFresnel(vec3 base, vec3 N, vec3 V, vec3 worldPos, float fadeIn, vec4 tex) {
+          LightResult li = calcLighting(N, V, worldPos);
+
+          float f = li.fresnel;
+          // 强菲涅尔: 边缘几乎全是光
+          vec3 fresnelGlow = uFresnelColor * f * uFresnelIntensity * 2.0;
+
+          // 柔和漫反射
+          vec3 diffuse = base * (li.hemi * 0.6 + li.dir * 0.5 + li.pointDiff * 0.8);
+
+          // 玻璃感: 中心偏透明, 边缘不透明
+          float alpha = mix(0.4, 1.0, f) * tex.a;
+
+          // 高光
+          vec3 H = normalize(V + li.L);
+          float spec = pow(max(dot(N, H), 0.0), mix(16.0, 128.0, 1.0 - uRoughness));
+          vec3 specColor = uPointLightColor * spec * 0.6;
+
+          vec3 emissive = texture2D(tEmissive, vUv).rgb * uEmissiveIntensity * fadeIn;
+          vec3 color = diffuse + fresnelGlow + specColor + emissive;
+          return vec4(color, alpha);
         }
-        `
-      );
 
-      // ─── 片元 Shader 注入 ───
-      // 原版 colorNode: mix(0, texture(map), clamp(0, 1, startProgress*2))
-      // 原版 frontFacing: if(faceDirection) normal=abs(normal) else normal=normal
-      shader.uniforms.uStartProgressF = uStartProgress;
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <common>',
-        /* glsl */`
-        #include <common>
-        uniform float uStartProgressF;
-        `
-      );
-      // 法线处理 — DoubleSide 时确保背面法线翻转
-      // 不做 abs()，避免不自然的对比度
-      // 颜色淡入
-      shader.fragmentShader = shader.fragmentShader.replace(
-        '#include <color_fragment>',
-        /* glsl */`
-        #include <color_fragment>
-        float fadeIn = clamp(uStartProgressF * 2.0, 0.0, 1.0);
-        diffuseColor.rgb = mix(vec3(0.0), diffuseColor.rgb, fadeIn);
-        `
-      );
-    };
+        // ═══════════════════════════════════════
+        // Shader 2: Iridescent 彩虹 (薄膜干涉)
+        // ═══════════════════════════════════════
+        vec4 shaderIridescent(vec3 base, vec3 N, vec3 V, vec3 worldPos, float fadeIn, vec4 tex) {
+          LightResult li = calcLighting(N, V, worldPos);
+
+          float NdV = max(dot(N, V), 0.0);
+          // 薄膜干涉色相偏移
+          float iriHue = fract(NdV * 2.0 + uTime * 0.05);
+          vec3 iriColor = hsv2rgb(vec3(iriHue, 0.6, 1.0));
+
+          float f = li.fresnel;
+          vec3 diffuse = base * (li.hemi + li.dir * 0.6);
+          vec3 iri = iriColor * f * 1.5;
+          vec3 sss = base * li.dirSSS * uSSSIntensity * 0.5;
+
+          vec3 emissive = texture2D(tEmissive, vUv).rgb * uEmissiveIntensity * fadeIn;
+          vec3 color = diffuse + iri + sss + li.pointDiff * base * 0.5 + emissive;
+          return vec4(color, tex.a);
+        }
+
+        // ═══════════════════════════════════════
+        // Shader 3: Silk 丝绸 (各向异性高光)
+        // ═══════════════════════════════════════
+        vec4 shaderSilk(vec3 base, vec3 N, vec3 V, vec3 worldPos, float fadeIn, vec4 tex) {
+          LightResult li = calcLighting(N, V, worldPos);
+
+          // 丝绸各向异性: 基于切线方向
+          vec3 T = normalize(cross(N, vec3(0.0, 1.0, 0.0)));
+          vec3 H = normalize(V + li.L);
+          float TdH = dot(T, H);
+          float aniso = pow(sqrt(1.0 - TdH * TdH), mix(8.0, 64.0, 1.0 - uRoughness));
+
+          vec3 diffuse = base * (li.hemi + li.dir * 0.7);
+          vec3 silkSpec = uBaseColor * 1.5 * aniso;
+
+          // 柔和光泽
+          float sheen = pow(1.0 - max(dot(N, V), 0.0), 1.5) * 0.4;
+          vec3 sheenColor = mix(base, vec3(1.0), 0.3) * sheen;
+
+          vec3 sss = base * li.dirSSS * uSSSIntensity * 0.4;
+          vec3 emissive = texture2D(tEmissive, vUv).rgb * uEmissiveIntensity * fadeIn;
+          vec3 color = diffuse + silkSpec + sheenColor + sss + li.pointDiff * base * 0.6 + emissive;
+          return vec4(color, tex.a);
+        }
+
+        // ═══════════════════════════════════════
+        // Shader 4: Crystal 水晶 (折射感 + 焦散)
+        // ═══════════════════════════════════════
+        vec4 shaderCrystal(vec3 base, vec3 N, vec3 V, vec3 worldPos, float fadeIn, vec4 tex) {
+          LightResult li = calcLighting(N, V, worldPos);
+
+          float NdV = max(dot(N, V), 0.0);
+          float f = li.fresnel;
+
+          // 水晶折射色散
+          vec3 refractDir = refract(-V, N, 0.9);
+          float dispR = max(dot(refractDir, li.L), 0.0);
+          float dispG = max(dot(refract(-V, N, 0.92), li.L), 0.0);
+          float dispB = max(dot(refract(-V, N, 0.94), li.L), 0.0);
+          vec3 caustic = vec3(
+            pow(dispR, 4.0),
+            pow(dispG, 4.0),
+            pow(dispB, 4.0)
+          ) * 2.0;
+
+          // 锐利高光
+          vec3 H = normalize(V + li.L);
+          float spec = pow(max(dot(N, H), 0.0), 128.0);
+
+          vec3 diffuse = base * (li.hemi * 0.5 + li.pointDiff * 0.6);
+          vec3 crystalReflect = uFresnelColor * f * 1.2;
+          
+          float alpha = mix(0.5, 1.0, f) * tex.a;
+
+          vec3 emissive = texture2D(tEmissive, vUv).rgb * uEmissiveIntensity * fadeIn;
+          vec3 color = diffuse + crystalReflect + caustic + vec3(spec) * 0.4 + emissive;
+          return vec4(color, alpha);
+        }
+
+        void main() {
+          vec4 tex = texture2D(tMap, vUv);
+          float fadeIn = clamp(uStartProgress * 2.0, 0.0, 1.0);
+
+          // 基色 = 贴图 × 自定义颜色
+          vec3 base = tex.rgb * uBaseColor * fadeIn * 1.8;
+
+          // 法线 (双面) + 边缘柔化防止接缝描边
+          vec3 N = normalize(vNormal);
+          if (!gl_FrontFacing) N = -N;
+          vec3 V = normalize(vViewDir);
+
+          // 当视线几乎平行花瓣（掠射角），将法线向视线方向偏转
+          // 消除正/反面交界处的硬接缝
+          float edgeNdV = dot(N, V);
+          if (edgeNdV < 0.15) {
+            // 在掠射角区域，逐渐将法线混合向视线方向
+            float blend = smoothstep(0.0, 0.15, edgeNdV);
+            N = normalize(mix(V * 0.5 + N * 0.5, N, blend));
+          }
+
+          vec4 result;
+          int st = int(uShaderType + 0.5);
+          if (st == 1) {
+            result = shaderFresnel(base, N, V, vWorldPos, fadeIn, tex);
+          } else if (st == 2) {
+            result = shaderIridescent(base, N, V, vWorldPos, fadeIn, tex);
+          } else if (st == 3) {
+            result = shaderSilk(base, N, V, vWorldPos, fadeIn, tex);
+          } else if (st == 4) {
+            result = shaderCrystal(base, N, V, vWorldPos, fadeIn, tex);
+          } else {
+            result = shaderSSS(base, N, V, vWorldPos, fadeIn, tex);
+          }
+
+          // 描边/轮廓 (基于菲涅尔边缘检测)
+          if (uRimIntensity > 0.01) {
+            float rimEdge = pow(1.0 - max(dot(N, V), 0.0), 1.0 / max(uRimWidth, 0.05));
+            float rimMask = smoothstep(0.3, 0.8, rimEdge);
+            result.rgb = mix(result.rgb, uRimColor * (1.0 + uRimIntensity), rimMask * uRimIntensity);
+          }
+
+          // Reinhard tone mapping
+          result.rgb = result.rgb / (result.rgb + vec3(0.8));
+          // gamma
+          result.rgb = pow(result.rgb, vec3(1.0 / 2.2));
+
+          gl_FragColor = result;
+        }
+      `,
+    });
 
     const mesh = new THREE.InstancedMesh(geo, mat, 128);
     const dummy = new THREE.Object3D();
@@ -647,10 +872,16 @@ export class Bloom {
 
     // ── 入场动画 (原版 gsap timeline 1:1) ──
 
-    // 1. camera z: 0 → 2, duration 2s (easeOut)
-    const camT = Math.min(elapsed / 2.0, 1);
-    const camZ = camT * camT * (3 - 2 * camT) * 2; // smoothstep 0→2
+    // 1. camera: 从正上方 (0,4,0.3) 缓缓下降到 (0,2,2)
+    //    延迟 1s 等花开始绽放后再移动, 总动画 3s
+    const camDelay = 1.0;
+    const camElapsed = Math.max(elapsed - camDelay, 0);
+    const camT = Math.min(camElapsed / 3.0, 1);
+    const camEase = camT * camT * (3 - 2 * camT); // smoothstep
+    const camY = 4.0 + (2.0 - 4.0) * camEase;   // 4 → 2
+    const camZ = 0.3 + (2.0 - 0.3) * camEase;   // 0.3 → 2
     this._camera.position.z = camZ;
+    this._camera.position.y = camY;
 
     // 2. group rotation y: 0 → -PI/2, duration 1.5s
     const rotT = Math.min(elapsed / 1.5, 1);
@@ -669,9 +900,9 @@ export class Bloom {
     // position.lerp({x: -(0.3 * pointer.x), y: 2, z: 2}, 0.05)
     const tx = -(0.3 * this._pointer.x);
     this._camera.position.x += (tx - this._camera.position.x) * 0.05;
-    this._camera.position.y += (2 - this._camera.position.y) * 0.05;
-    // z 在入场动画期间由动画驱动，结束后 lerp 到 2
+    // y 和 z 在入场动画期间由动画驱动，结束后 lerp 到目标
     if (camT >= 1) {
+      this._camera.position.y += (2 - this._camera.position.y) * 0.05;
       this._camera.position.z += (2 - this._camera.position.z) * 0.05;
     }
     this._camera.lookAt(0, 0, 0);
@@ -835,6 +1066,56 @@ export class Bloom {
       case 'stemPosY':
         if (this._stemMesh) this._stemMesh.position.y = value;
         break;
+
+      // ── 材质类型 ──
+      case 'shaderType':
+        this._uShaderType.value = value;
+        break;
+
+      // ── 材质参数 ──
+      case 'baseColor': {
+        const c = new THREE.Color(value);
+        this._uBaseColor.value.copy(c);
+        break;
+      }
+      case 'roughness': this._uRoughness.value = value; break;
+      case 'metalness': this._uMetalness.value = value; break;
+      case 'emissiveColor': {
+        const c = new THREE.Color(value);
+        this._uEmissiveColor.value.copy(c);
+        break;
+      }
+      case 'emissiveIntensity': this._uEmissiveIntensity.value = value; break;
+      case 'sssIntensity': this._uSSSIntensity.value = value; break;
+      case 'sssColor': {
+        const c = new THREE.Color(value);
+        this._uSSSColor.value.copy(c);
+        break;
+      }
+      case 'fresnelPower': this._uFresnelPower.value = value; break;
+      case 'fresnelColor': {
+        const c = new THREE.Color(value);
+        this._uFresnelColor.value.copy(c);
+        break;
+      }
+      case 'fresnelIntensity': this._uFresnelIntensity.value = value; break;
+      case 'pointLightIntensity': this._uPointLightIntensity.value = value; break;
+      case 'pointLightColor': {
+        const c = new THREE.Color(value);
+        this._uPointLightColor.value.copy(c);
+        break;
+      }
+      case 'pointLightY': this._uPointLightY.value = value; break;
+      case 'envLightIntensity': this._uEnvLightIntensity.value = value; break;
+      case 'dirLightIntensity': this._uDirLightIntensity.value = value; break;
+      case 'translucency': this._uTranslucency.value = value; break;
+      case 'rimWidth': this._uRimWidth.value = value; break;
+      case 'rimIntensity': this._uRimIntensity.value = value; break;
+      case 'rimColor': {
+        const c = new THREE.Color(value);
+        this._uRimColor.value.copy(c);
+        break;
+      }
 
       // ── 背景颜色 ──
       case 'bgColorTop':
